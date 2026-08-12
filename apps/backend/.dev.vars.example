@@ -1,0 +1,23 @@
+# Generate independent random 32-byte base64url values for these secrets.
+TOKEN_ENCRYPTION_KEY=
+MEDIA_LEASE_SECRET=
+AUDIT_HASH_SECRET=
+
+# Required only when UPLOAD_MODE=direct.
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# Provider OAuth applications. Leave a provider blank to expose it as Not configured.
+META_APP_ID=
+META_APP_SECRET=
+INSTAGRAM_APP_ID=
+INSTAGRAM_APP_SECRET=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+TIKTOK_CLIENT_KEY=
+TIKTOK_CLIENT_SECRET=
+
+# Webhook verification/signature secrets.
+META_WEBHOOK_VERIFY_TOKEN=
+# TikTok signs webhooks with TIKTOK_CLIENT_SECRET; do not create a second secret.

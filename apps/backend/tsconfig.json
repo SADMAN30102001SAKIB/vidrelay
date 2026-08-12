@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "WebWorker"],
+    "noEmit": true,
+    "types": ["./worker-configuration.d.ts", "node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "drizzle.config.ts",
+    "eslint.config.mjs",
+    "vitest.config.ts",
+    "worker-configuration.d.ts"
+  ]
+}

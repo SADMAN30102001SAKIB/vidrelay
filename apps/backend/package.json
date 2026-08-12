@@ -1,0 +1,37 @@
+{
+  "name": "@vidrelay/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 4000",
+    "build": "pnpm types:check && tsc --noEmit && wrangler deploy --dry-run --outdir dist",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "pnpm types:check && tsc --noEmit",
+    "test": "vitest run",
+    "types:generate": "wrangler types --env-interface CloudflareBindings",
+    "types:check": "wrangler types --env-interface CloudflareBindings --check",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --env production",
+    "deploy": "wrangler deploy --env production --minify"
+  },
+  "dependencies": {
+    "@vidrelay/shared": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.2",
+    "@types/node": "24.13.3",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.2",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.9.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.66.0",
+    "vitest": "4.1.10",
+    "wrangler": "4.120.0"
+  }
+}

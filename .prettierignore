@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+dist
+coverage
+.wrangler
+.fallow
+pnpm-lock.yaml
+apps/backend/worker-configuration.d.ts
+apps/backend/migrations/meta
+GPT-chat-thread.txt

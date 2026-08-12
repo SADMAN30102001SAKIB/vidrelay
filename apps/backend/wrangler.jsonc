@@ -1,0 +1,87 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "vidrelay-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+  "vars": {
+    "APP_ENV": "development",
+    "APP_ORIGINS": "http://localhost:3000",
+    "PUBLIC_APP_ORIGIN": "http://localhost:3000",
+    "PUBLIC_API_ORIGIN": "http://localhost:4000",
+    "ALLOW_SIGNUPS": "true",
+    "UPLOAD_MODE": "worker_proxy",
+    "R2_BUCKET_NAME": "vidrelay-media",
+    "META_GRAPH_VERSION": "v25.0",
+    "FACEBOOK_CAPABILITY": "development_only",
+    "INSTAGRAM_CAPABILITY": "development_only",
+    "YOUTUBE_CAPABILITY": "private_only",
+    "TIKTOK_CAPABILITY": "private_only"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vidrelay"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "vidrelay-media"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "vidrelay-publish",
+      "binding": "PUBLISH_WORKFLOW",
+      "class_name": "PublishWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "env": {
+    "production": {
+      "vars": {
+        "APP_ENV": "production",
+        "APP_ORIGINS": "https://app.example.com",
+        "PUBLIC_APP_ORIGIN": "https://app.example.com",
+        "PUBLIC_API_ORIGIN": "https://api.example.com",
+        "ALLOW_SIGNUPS": "true",
+        "UPLOAD_MODE": "direct",
+        "R2_BUCKET_NAME": "vidrelay-media-production",
+        "META_GRAPH_VERSION": "v25.0",
+        "FACEBOOK_CAPABILITY": "review_pending",
+        "INSTAGRAM_CAPABILITY": "review_pending",
+        "YOUTUBE_CAPABILITY": "private_only",
+        "TIKTOK_CAPABILITY": "private_only"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "vidrelay-production"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "vidrelay-media-production"
+        }
+      ],
+      "workflows": [
+        {
+          "name": "vidrelay-publish-production",
+          "binding": "PUBLISH_WORKFLOW",
+          "class_name": "PublishWorkflow"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "entry": ["apps/backend/src/index.ts", "packages/shared/src/index.ts"],
+  "ignorePatterns": [
+    "apps/backend/worker-configuration.d.ts",
+    "apps/backend/dist/**",
+    "apps/frontend/next-env.d.ts",
+    "apps/frontend/.next/**",
+    "apps/frontend/out/**",
+    "**/.wrangler/**"
+  ],
+  "usedClassMembers": [
+    {
+      "extends": "WorkflowEntrypoint",
+      "members": ["run"]
+    }
+  ]
+}

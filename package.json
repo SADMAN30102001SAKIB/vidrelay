@@ -1,0 +1,33 @@
+{
+  "name": "vidrelay",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @vidrelay/frontend --filter @vidrelay/backend --parallel dev",
+    "dev:frontend": "pnpm --filter @vidrelay/frontend dev",
+    "dev:backend": "pnpm --filter @vidrelay/backend dev",
+    "types:generate": "pnpm --filter @vidrelay/backend types:generate",
+    "generate": "pnpm --filter @vidrelay/backend db:generate",
+    "migrate:local": "pnpm --filter @vidrelay/backend db:migrate:local",
+    "migrate:remote": "pnpm --filter @vidrelay/backend db:migrate:remote",
+    "build": "pnpm -r --if-present build",
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "fallow": "fallow",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm fallow && pnpm build",
+    "deploy:frontend": "pnpm --filter @vidrelay/frontend deploy",
+    "deploy:backend": "pnpm --filter @vidrelay/backend deploy"
+  },
+  "devDependencies": {
+    "fallow": "3.14.0",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3"
+  }
+}

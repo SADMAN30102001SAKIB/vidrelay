@@ -1,0 +1,127 @@
+import { Cable, ListChecks, Send, UploadCloud } from "lucide-react";
+import Link from "next/link";
+
+import type { LucideIcon } from "lucide-react";
+
+import { CapabilityOverview } from "@/components/CapabilityOverview";
+import { PublicShell } from "@/components/PublicChrome";
+import { PlatformMark, StatusBadge, buttonClass } from "@/components/ui";
+
+const features: Array<{ copy: string; icon: LucideIcon; title: string }> = [
+  {
+    copy: "Authorize only through each platform’s official OAuth flow.",
+    icon: Cable,
+    title: "Connect accounts"
+  },
+  {
+    copy: "Check size, duration, dimensions, and the server-inspected codecs before publishing.",
+    icon: UploadCloud,
+    title: "Verify once"
+  },
+  {
+    copy: "Set privacy, captions, audience, disclosure, and interaction controls explicitly.",
+    icon: Send,
+    title: "Compose per platform"
+  },
+  {
+    copy: "See published, retryable, reauthorization, and reconciliation states separately.",
+    icon: ListChecks,
+    title: "Track every result"
+  }
+];
+
+export default function HomePage() {
+  return (
+    <PublicShell>
+      <section className="hero">
+        <div>
+          <p className="eyebrow">Cross-platform video publishing</p>
+          <h1 className="display-title">
+            Publish once.{" "}
+            <span className="gradient-word">
+              Know what happened everywhere.
+            </span>
+          </h1>
+          <p className="hero-copy">
+            Upload one verified vertical MP4, choose your connected accounts,
+            and keep every platform’s required controls and delivery status in
+            one place.
+          </p>
+          <div className="button-row">
+            <Link className={buttonClass("primary")} href="/auth/signup">
+              Create an account
+            </Link>
+            <Link className={buttonClass("secondary")} href="/auth/login">
+              Log in
+            </Link>
+          </div>
+        </div>
+        <div aria-label="Example publishing status" className="hero-panel">
+          <div className="hero-panel-inner">
+            <div className="mock-video">
+              <UploadCloud aria-hidden="true" size={36} />
+              <span>vertical-story.mp4</span>
+              <StatusBadge label="Verified" tone="success" />
+            </div>
+            <div className="destination-stack">
+              {(["youtube", "facebook", "instagram", "tiktok"] as const).map(
+                (platform, index) => (
+                  <div className="destination-row" key={platform}>
+                    <PlatformMark platform={platform} />
+                    <span>
+                      {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                    </span>
+                    <StatusBadge
+                      label={index < 3 ? "Published" : "Processing"}
+                      tone={index < 3 ? "success" : "info"}
+                    />
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="section" id="how-it-works">
+        <div className="section-heading">
+          <p className="eyebrow">A controlled publishing flow</p>
+          <h2>Four steps, with no hidden platform assumptions</h2>
+          <p>
+            VidRelay validates the shared media envelope, then preserves the
+            controls each destination requires.
+          </p>
+        </div>
+        <div className="feature-grid">
+          {features.map(feature => {
+            const Icon = feature.icon;
+            return (
+              <article className="feature-card" key={feature.title}>
+                <span className="icon-box">
+                  <Icon aria-hidden="true" size={21} />
+                </span>
+                <h3>{feature.title}</h3>
+                <p>{feature.copy}</p>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="section" aria-labelledby="availability-heading">
+        <div className="section-heading">
+          <p className="eyebrow">Live service capability</p>
+          <h2 id="availability-heading">
+            Availability is disclosed, not simulated
+          </h2>
+          <p>
+            Provider access can depend on credentials, app review, test-account
+            limits, and privacy restrictions. The service reports its current
+            mode below.
+          </p>
+        </div>
+        <CapabilityOverview />
+      </section>
+    </PublicShell>
+  );
+}
