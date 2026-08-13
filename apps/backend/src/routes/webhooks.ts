@@ -130,21 +130,10 @@ const disconnectTiktokConnection = async (
     ),
     bindings.DB.prepare(
       "UPDATE publish_attempts SET status = (SELECT status FROM publish_destinations WHERE publish_destinations.id = publish_attempts.destination_id), stage = (SELECT stage FROM publish_destinations WHERE publish_destinations.id = publish_attempts.destination_id), error_code = 'authorization_removed', error_message = 'TikTok authorization was removed while this destination was pending.', finished_at = COALESCE(finished_at, ?), updated_at = ? WHERE EXISTS (SELECT 1 FROM publish_destinations WHERE publish_destinations.id = publish_attempts.destination_id AND publish_destinations.connection_id = ? AND publish_destinations.attempt_number = publish_attempts.attempt_number AND publish_destinations.status IN ('cancelled', 'reconciliation_required')) AND EXISTS (SELECT 1 FROM social_connections WHERE id = ? AND credentials_encrypted = ? AND status = 'disconnected')"
-    ).bind(
-      now,
-      now,
-      connection.id,
-      connection.id,
-      credentialsEncrypted
-    ),
+    ).bind(now, now, connection.id, connection.id, credentialsEncrypted),
     bindings.DB.prepare(
       "UPDATE posts SET status = CASE WHEN NOT EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status <> 'published') THEN 'published' WHEN EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status IN ('queued', 'starting', 'transferring', 'processing', 'publishing', 'retry_scheduled')) THEN 'publishing' WHEN EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status = 'published') THEN 'partial_success' WHEN NOT EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status <> 'cancelled') THEN 'cancelled' ELSE 'failed' END, updated_at = ? WHERE id IN (SELECT post_id FROM publish_destinations WHERE connection_id = ?) AND EXISTS (SELECT 1 FROM social_connections WHERE id = ? AND credentials_encrypted = ? AND status = 'disconnected')"
-    ).bind(
-      now,
-      connection.id,
-      connection.id,
-      credentialsEncrypted
-    )
+    ).bind(now, connection.id, connection.id, credentialsEncrypted)
   ]);
   return results[0]?.meta.changes === 1 ? "disconnected" : "superseded";
 };

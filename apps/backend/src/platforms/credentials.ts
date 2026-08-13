@@ -341,7 +341,11 @@ export const ensureFreshCredentials = async (
         retryable: true
       });
     }
-    return { credentials: refreshed, credentialsEncrypted, lastErrorCode: null };
+    return {
+      credentials: refreshed,
+      credentialsEncrypted,
+      lastErrorCode: null
+    };
   } catch (error) {
     if (error instanceof ProviderError && error.retryable) {
       await db

@@ -255,14 +255,13 @@ const createCustomerAccount = async (
       workspaceId
     }),
     db.insert(auditEvents).values({
-      action: audit === undefined ? "account.registered" : "account.provisioned",
+      action:
+        audit === undefined ? "account.registered" : "account.provisioned",
       actorUserId: audit?.actorUserId ?? userId,
       entityId: userId,
       entityType: "user",
       id: crypto.randomUUID(),
-      metadataJson: JSON.stringify(
-        audit === undefined ? {} : { workspaceId }
-      ),
+      metadataJson: JSON.stringify(audit === undefined ? {} : { workspaceId }),
       workspaceId: audit?.workspaceId ?? workspaceId
     })
   ]);

@@ -138,10 +138,7 @@ const deleteStoredObject = async (
       .update(uploads)
       .set({ storageDeletedAt: Date.now(), updatedAt: Date.now() })
       .where(
-        and(
-          eq(uploads.id, row.id),
-          eq(uploads.workspaceId, row.workspaceId)
-        )
+        and(eq(uploads.id, row.id), eq(uploads.workspaceId, row.workspaceId))
       )
       .returning({ id: uploads.id });
     if (updated !== undefined) {

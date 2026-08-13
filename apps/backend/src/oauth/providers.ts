@@ -181,10 +181,7 @@ const exchangedAccessTokenSchema = z.object({
 const existingConnection = async (
   context: DiscoveryContext,
   connection: DiscoveredConnection
-): Promise<
-  | { credentialsEncrypted: string; id: string }
-  | undefined
-> => {
+): Promise<{ credentialsEncrypted: string; id: string } | undefined> => {
   const [existing] = await context.db
     .select({
       credentialsEncrypted: socialConnections.credentialsEncrypted,
@@ -239,9 +236,7 @@ const connectionStatement = (
       ? authorizedAt
       : null;
   const tiktokLifecycleFreshAfter =
-    tiktokAuthorizedAt === null
-      ? null
-      : tiktokAuthorizedAt - 15 * 60 * 1000;
+    tiktokAuthorizedAt === null ? null : tiktokAuthorizedAt - 15 * 60 * 1000;
   const connectionExisted = prepared.previousCredentialsEncrypted !== null;
   const expectedCredentials =
     prepared.previousCredentialsEncrypted ?? prepared.credentialsEncrypted;
@@ -313,10 +308,7 @@ const connectionGuardStatement = (
   // Force the D1 batch to roll back when a guarded insert/update saved no row.
   context.bindings.DB.prepare(
     "SELECT CASE WHEN EXISTS (SELECT 1 FROM social_connections WHERE id = ? AND credentials_encrypted = ?) THEN 1 ELSE json_extract('invalid', '$') END AS connection_saved"
-  ).bind(
-    prepared.id,
-    prepared.credentialsEncrypted
-  );
+  ).bind(prepared.id, prepared.credentialsEncrypted);
 
 const persistConnections = async (
   context: DiscoveryContext,
@@ -464,9 +456,7 @@ const storedMetaGrantMayBeShared = async (
     }
 
     if (platform === "facebook") {
-      const storedGrantUserId = facebookGrantUserId(
-        storedGrant.metadataJson
-      );
+      const storedGrantUserId = facebookGrantUserId(storedGrant.metadataJson);
       if (storedGrantUserId === remoteGrantId) {
         return true;
       }
@@ -553,9 +543,7 @@ const connectFacebook = async (context: DiscoveryContext): Promise<number> => {
         operation: "facebook_token_exchange"
       }
     );
-    const shortRevocable = exchangedAccessTokenSchema.parse(
-      shortTokenResponse
-    );
+    const shortRevocable = exchangedAccessTokenSchema.parse(shortTokenResponse);
     grantCredentials = baseCredential({
       accessToken: shortRevocable.access_token,
       userAccessToken: shortRevocable.access_token
@@ -734,9 +722,7 @@ const connectInstagram = async (context: DiscoveryContext): Promise<number> => {
       },
       { operation: "instagram_token_exchange" }
     );
-    const shortRevocable = exchangedAccessTokenSchema.parse(
-      shortTokenResponse
-    );
+    const shortRevocable = exchangedAccessTokenSchema.parse(shortTokenResponse);
     grantCredentials = baseCredential({
       accessToken: shortRevocable.access_token
     });
@@ -1075,12 +1061,8 @@ const connectTiktok = async (context: DiscoveryContext): Promise<number> => {
     ) {
       throw failure;
     }
-    if (
-      discoveredRemoteAccountId !== null &&
-      authorizationStartedAt !== null
-    ) {
-      const staleDisconnectBefore =
-        authorizationStartedAt - 15 * 60 * 1000;
+    if (discoveredRemoteAccountId !== null && authorizationStartedAt !== null) {
+      const staleDisconnectBefore = authorizationStartedAt - 15 * 60 * 1000;
       const removedAt = await latestTiktokRemoval(
         context.bindings,
         discoveredRemoteAccountId

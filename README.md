@@ -75,17 +75,17 @@ subrequest allowance; this is a mandatory release gate, not an optimization.
 
 ## Root commands
 
-| Command                       | Purpose                                                                   |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| `pnpm dev`                    | Run frontend and backend development servers                              |
-| `pnpm types:generate`         | Regenerate Wrangler binding types after configuration changes             |
-| `pnpm generate`               | Generate a Drizzle migration from schema changes                          |
-| `pnpm migrate:local`          | Apply D1 migrations to local Wrangler state                               |
-| `pnpm migrations:list:remote` | List pending migrations for the production config without applying them   |
-| `pnpm migrate:remote`         | Apply D1 migrations to the production D1 database; this is a remote write |
+| Command                       | Purpose                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `pnpm dev`                    | Run frontend and backend development servers                                             |
+| `pnpm types:generate`         | Regenerate Wrangler binding types after configuration changes                            |
+| `pnpm generate`               | Generate a Drizzle migration from schema changes                                         |
+| `pnpm migrate:local`          | Apply D1 migrations to local Wrangler state                                              |
+| `pnpm migrations:list:remote` | List pending migrations for the production config without applying them                  |
+| `pnpm migrate:remote`         | Apply D1 migrations to the production D1 database; this is a remote write                |
 | `pnpm check`                  | Format check, lint, typecheck, tests, Fallow, and builds; requires `NEXT_PUBLIC_API_URL` |
-| `pnpm deploy:backend`         | Deploy the production API Worker and Workflow                             |
-| `pnpm deploy:frontend`        | Build and upload the static frontend to the `vidrelay` Pages project      |
+| `pnpm deploy:backend`         | Deploy the production API Worker and Workflow                                            |
+| `pnpm deploy:frontend`        | Build and upload the static frontend to the `vidrelay` Pages project                     |
 
 `apps/backend/wrangler.jsonc` is local-only. Both production commands require an
 ignored `apps/backend/wrangler.production.jsonc` copied from the checked-in

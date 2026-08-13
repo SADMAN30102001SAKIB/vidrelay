@@ -70,8 +70,7 @@ const buildPost = async (
     ),
     id: row.post.id,
     sharedCaption: row.post.sharedCaption,
-    sourceRemovalEligible:
-      Number(sourceRemoval?.eligible ?? 0) === 1,
+    sourceRemovalEligible: Number(sourceRemoval?.eligible ?? 0) === 1,
     status: row.post.status,
     submittedAt: row.post.submittedAt,
     updatedAt: row.post.updatedAt,
@@ -390,12 +389,7 @@ postRoutes.post("/", async context => {
     if (replayed !== undefined) {
       return context.json({
         idempotentReplay: true,
-        post: await buildPost(
-          db,
-          context.env.DB,
-          replayed.id,
-          auth.workspaceId
-        )
+        post: await buildPost(db, context.env.DB, replayed.id, auth.workspaceId)
       });
     }
     const active = await context.env.DB.prepare(

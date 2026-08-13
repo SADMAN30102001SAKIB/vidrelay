@@ -473,13 +473,13 @@ function SettingsContent() {
             <Notice tone="danger">
               Automatic deletion could not finish. Contact the service operator
               with your private reference
-              {deletion.failureCode === null ? "." : (
+              {deletion.failureCode === null ? (
+                "."
+              ) : (
                 <>
-                  {" "}and support code{" "}
-                  <strong className="code-text">
-                    {deletion.failureCode}
-                  </strong>
-                  .
+                  {" "}
+                  and support code{" "}
+                  <strong className="code-text">{deletion.failureCode}</strong>.
                 </>
               )}
             </Notice>

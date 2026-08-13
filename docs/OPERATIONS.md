@@ -78,18 +78,18 @@ filled production file.
 
 ### Secret Worker variables
 
-| Secret                                                      | When required                                             |
-| ----------------------------------------------------------- | --------------------------------------------------------- |
-| `TOKEN_ENCRYPTION_KEY`                                      | Always; encrypts provider credentials and resumable state |
-| `MEDIA_LEASE_SECRET`                                        | Always; signs short-lived private-media leases            |
-| `AUDIT_HASH_SECRET`                                         | Always; keyed hashing for security/audit identifiers      |
+| Secret                                                      | When required                                              |
+| ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `TOKEN_ENCRYPTION_KEY`                                      | Always; encrypts provider credentials and resumable state  |
+| `MEDIA_LEASE_SECRET`                                        | Always; signs short-lived private-media leases             |
+| `AUDIT_HASH_SECRET`                                         | Always; keyed hashing for security/audit identifiers       |
 | `BOOTSTRAP_SIGNUP_TOKEN`                                    | One-time first-owner creation while public signups are off |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Production `direct` upload signing                        |
-| `META_APP_ID`, `META_APP_SECRET`                            | Facebook Pages when enabled                               |
-| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`                  | Instagram when enabled                                    |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                  | YouTube when enabled                                      |
-| `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`                 | TikTok when enabled                                       |
-| `META_WEBHOOK_VERIFY_TOKEN`                                 | Meta webhook verification when registered                 |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Production `direct` upload signing                         |
+| `META_APP_ID`, `META_APP_SECRET`                            | Facebook Pages when enabled                                |
+| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`                  | Instagram when enabled                                     |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                  | YouTube when enabled                                       |
+| `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`                 | TikTok when enabled                                        |
+| `META_WEBHOOK_VERIFY_TOKEN`                                 | Meta webhook verification when registered                  |
 
 Keep every provider or webhook secret unset until that integration is explicitly
 enabled and its callback or webhook has been registered and tested.

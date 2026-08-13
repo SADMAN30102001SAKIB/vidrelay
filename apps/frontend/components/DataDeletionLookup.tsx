@@ -83,9 +83,7 @@ export function DataDeletionLookup() {
         <Button
           onClick={() => {
             try {
-              const saved = localStorage.getItem(
-                "vidrelay.deletion-reference"
-              );
+              const saved = localStorage.getItem("vidrelay.deletion-reference");
               if (saved === null) {
                 setError("No deletion reference is saved in this browser.");
               } else {
@@ -127,7 +125,8 @@ export function DataDeletionLookup() {
           ) : null}
           {deletion.failureCode === null ? null : (
             <>
-              {" "}Support code:{" "}
+              {" "}
+              Support code:{" "}
               <strong className="code-text">{deletion.failureCode}</strong>.
             </>
           )}

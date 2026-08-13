@@ -75,8 +75,7 @@ export default function CreatePostPage() {
   const [tiktokDuet, setTiktokDuet] = useState(false);
   const [tiktokStitch, setTiktokStitch] = useState(false);
   const [tiktokAi, setTiktokAi] = useState(false);
-  const [tiktokCommercialContent, setTiktokCommercialContent] =
-    useState(false);
+  const [tiktokCommercialContent, setTiktokCommercialContent] = useState(false);
   const [tiktokOwnBrand, setTiktokOwnBrand] = useState(false);
   const [tiktokBranded, setTiktokBranded] = useState(false);
   const [tiktokConsent, setTiktokConsent] = useState(false);
@@ -760,8 +759,7 @@ export default function CreatePostPage() {
                           disabled={creatorInfo === null}
                           id="tiktok-privacy"
                           onChange={event => {
-                            const privacy = event.target
-                              .value as TikTokPrivacy;
+                            const privacy = event.target.value as TikTokPrivacy;
                             setTiktokPrivacy(privacy);
                             if (privacy === "SELF_ONLY") {
                               setTiktokBranded(false);
@@ -1009,8 +1007,7 @@ export default function CreatePostPage() {
                   (tiktokCommercialContent &&
                     !tiktokOwnBrand &&
                     !tiktokBranded) ||
-                  (effectiveTikTokPrivacy === "SELF_ONLY" &&
-                    tiktokBranded) ||
+                  (effectiveTikTokPrivacy === "SELF_ONLY" && tiktokBranded) ||
                   (upload !== null &&
                     upload.durationMs !== null &&
                     creatorInfo !== null &&

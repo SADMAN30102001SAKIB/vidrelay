@@ -415,7 +415,10 @@ connectionRoutes.post(
         and(
           eq(socialConnections.id, row.id),
           eq(socialConnections.status, row.status),
-          eq(socialConnections.credentialsEncrypted, fresh.credentialsEncrypted),
+          eq(
+            socialConnections.credentialsEncrypted,
+            fresh.credentialsEncrypted
+          ),
           fresh.lastErrorCode === null
             ? isNull(socialConnections.lastErrorCode)
             : eq(socialConnections.lastErrorCode, fresh.lastErrorCode)

@@ -176,15 +176,7 @@ accountRoutes.post("/deletion", async context => {
     ).bind(id, now, auth.workspaceId, id, auth.userId, auth.workspaceId),
     context.env.DB.prepare(
       "UPDATE publish_attempts SET status = (SELECT status FROM publish_destinations WHERE publish_destinations.id = publish_attempts.destination_id), stage = (SELECT stage FROM publish_destinations WHERE publish_destinations.id = publish_attempts.destination_id), finished_at = ?, updated_at = ? WHERE destination_id IN (SELECT publish_destinations.id FROM publish_destinations INNER JOIN posts ON posts.id = publish_destinations.post_id WHERE posts.workspace_id = ? AND publish_destinations.transition_token = ?) AND finished_at IS NULL AND EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND user_id = ? AND workspace_id = ? AND status = 'requested')"
-    ).bind(
-      now,
-      now,
-      auth.workspaceId,
-      id,
-      id,
-      auth.userId,
-      auth.workspaceId
-    ),
+    ).bind(now, now, auth.workspaceId, id, id, auth.userId, auth.workspaceId),
     context.env.DB.prepare(
       "UPDATE posts SET status = CASE WHEN NOT EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status <> 'published') THEN 'published' WHEN EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status = 'published') THEN 'partial_success' WHEN NOT EXISTS (SELECT 1 FROM publish_destinations WHERE post_id = posts.id AND status <> 'cancelled') THEN 'cancelled' ELSE 'failed' END, updated_at = ? WHERE workspace_id = ? AND EXISTS (SELECT 1 FROM publish_destinations WHERE publish_destinations.post_id = posts.id AND publish_destinations.transition_token = ?) AND EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND user_id = ? AND workspace_id = ? AND status = 'requested')"
     ).bind(now, auth.workspaceId, id, id, auth.userId, auth.workspaceId),
@@ -434,9 +426,10 @@ const revokeConnection = async (
       );
     for (const sibling of siblings) {
       try {
-        const siblingMetadata = JSON.parse(
-          sibling.metadataJson
-        ) as Record<string, unknown>;
+        const siblingMetadata = JSON.parse(sibling.metadataJson) as Record<
+          string,
+          unknown
+        >;
         if (
           grantUserId !== null &&
           siblingMetadata.grantUserId === grantUserId
@@ -621,8 +614,7 @@ export const processDeletionRequests = async (
     const claimNow = Date.now();
     const claimRetryCutoff = claimNow - deletionLeaseMs;
     if (request.status === "processing") {
-      const terminal =
-        request.attemptCount >= maximumAutomaticDeletionAttempts;
+      const terminal = request.attemptCount >= maximumAutomaticDeletionAttempts;
       const nextAttemptAt = terminal
         ? null
         : claimNow + deletionRetryDelay(request.attemptCount);
@@ -774,8 +766,7 @@ export const processDeletionRequests = async (
                 .first<{ last_error_code: string | null; status: string }>();
               if (
                 latest?.status === "disconnected" ||
-                latest?.last_error_code ===
-                  "account_deletion_revoke_completed"
+                latest?.last_error_code === "account_deletion_revoke_completed"
               ) {
                 continue;
               }

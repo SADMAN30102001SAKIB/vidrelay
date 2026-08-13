@@ -12,11 +12,9 @@ import {
 } from "./platforms";
 
 const idSchema = z.string().min(1).max(128);
-const httpsUrlSchema = z
-  .url()
-  .refine(value => /^https:\/\//i.test(value), {
-    message: "Use an HTTPS URL."
-  });
+const httpsUrlSchema = z.url().refine(value => /^https:\/\//i.test(value), {
+  message: "Use an HTTPS URL."
+});
 
 export const apiErrorSchema = z.object({
   error: z.object({
