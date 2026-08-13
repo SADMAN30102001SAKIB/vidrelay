@@ -6,15 +6,17 @@
   "scripts": {
     "dev": "wrangler dev --port 4000",
     "build": "pnpm types:check && tsc --noEmit && wrangler deploy --dry-run --outdir dist",
+    "build:production-config": "wrangler deploy --dry-run --config wrangler.production.jsonc --outdir ../../.wrangler-production-dry-run",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "pnpm types:check && tsc --noEmit",
     "test": "vitest run",
-    "types:generate": "wrangler types --env-interface CloudflareBindings",
-    "types:check": "wrangler types --env-interface CloudflareBindings --check",
+    "types:generate": "wrangler types --env-file wrangler-types.env --env-interface CloudflareBindings",
+    "types:check": "wrangler types --env-file wrangler-types.env --env-interface CloudflareBindings --check",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --env production",
-    "deploy": "wrangler deploy --env production --minify"
+    "db:migrations:list:remote": "wrangler d1 migrations list DB --remote --config wrangler.production.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.production.jsonc",
+    "deploy": "wrangler deploy --config wrangler.production.jsonc --minify"
   },
   "dependencies": {
     "@vidrelay/shared": "workspace:*",

@@ -1,4 +1,4 @@
-import type { Connection, ConnectionStatus, Platform } from "@vidrelay/shared";
+import type { Connection } from "@vidrelay/shared";
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -19,24 +19,18 @@ export interface StoredCredentials {
   userAccessToken: string | null;
 }
 
-interface ConnectionUpsert {
-  avatarUrl: string | null;
-  connectedByUserId: string;
+export interface FreshCredentials {
   credentials: StoredCredentials;
-  displayName: string;
-  expiresAt: number | null;
-  metadata: Record<string, unknown>;
-  platform: Platform;
-  remoteAccountId: string;
-  scopes: string[];
-  status?: ConnectionStatus;
-  workspaceId: string;
+  credentialsEncrypted: string;
+  lastErrorCode: string | null;
 }
 
 const parseObject = (value: string): Record<string, unknown> => {
   try {
     const parsed: unknown = JSON.parse(value);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    return parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {};
   } catch {
@@ -62,91 +56,6 @@ export const encodeCredentials = async (
     requireSecret(bindings.TOKEN_ENCRYPTION_KEY, "TOKEN_ENCRYPTION_KEY")
   );
 
-export const upsertConnection = async (
-  db: Database,
-  bindings: Bindings,
-  input: ConnectionUpsert
-): Promise<string> => {
-  const [existing] = await db
-    .select({
-      credentialsEncrypted: socialConnections.credentialsEncrypted,
-      id: socialConnections.id
-    })
-    .from(socialConnections)
-    .where(
-      and(
-        eq(socialConnections.workspaceId, input.workspaceId),
-        eq(socialConnections.provider, input.platform),
-        eq(socialConnections.remoteAccountId, input.remoteAccountId)
-      )
-    )
-    .limit(1);
-
-  let credentials = input.credentials;
-  if (credentials.refreshToken === null && existing !== undefined) {
-    const previous = await decodeCredentials(bindings, existing.credentialsEncrypted);
-    if (previous.refreshToken !== null) {
-      credentials = {
-        ...credentials,
-        refreshExpiresAt: previous.refreshExpiresAt,
-        refreshToken: previous.refreshToken
-      };
-    }
-  }
-
-  const now = Date.now();
-  const id = existing?.id ?? crypto.randomUUID();
-  const credentialsEncrypted = await encodeCredentials(bindings, credentials);
-
-  await db
-    .insert(socialConnections)
-    .values({
-      avatarUrl: input.avatarUrl,
-      connectedByUserId: input.connectedByUserId,
-      createdAt: now,
-      credentialsEncrypted,
-      displayName: input.displayName,
-      expiresAt: input.expiresAt,
-      id,
-      keyVersion: 1,
-      lastCheckedAt: now,
-      metadataJson: JSON.stringify(input.metadata),
-      provider: input.platform,
-      remoteAccountId: input.remoteAccountId,
-      scopesJson: JSON.stringify(input.scopes),
-      status: input.status ?? "connected",
-      updatedAt: now,
-      workspaceId: input.workspaceId
-    })
-    .onConflictDoUpdate({
-      set: {
-        avatarUrl: input.avatarUrl,
-        connectedByUserId: input.connectedByUserId,
-        credentialsEncrypted,
-        disconnectedAt: null,
-        displayName: input.displayName,
-        expiresAt: input.expiresAt,
-        keyVersion: 1,
-        lastCheckedAt: now,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        metadataJson: JSON.stringify(input.metadata),
-        refreshLeaseExpiresAt: null,
-        refreshLeaseId: null,
-        scopesJson: JSON.stringify(input.scopes),
-        status: input.status ?? "connected",
-        updatedAt: now
-      },
-      target: [
-        socialConnections.workspaceId,
-        socialConnections.provider,
-        socialConnections.remoteAccountId
-      ]
-    });
-
-  return id;
-};
-
 export const toConnection = (
   row: typeof socialConnections.$inferSelect
 ): Connection => ({
@@ -166,10 +75,50 @@ export const ensureFreshCredentials = async (
   db: Database,
   bindings: Bindings,
   row: typeof socialConnections.$inferSelect
-): Promise<StoredCredentials> => {
-  const credentials = await decodeCredentials(bindings, row.credentialsEncrypted);
-  if (credentials.expiresAt === null || credentials.expiresAt > Date.now() + 5 * 60 * 1000) {
-    return credentials;
+): Promise<FreshCredentials> => {
+  if (
+    row.lastErrorCode?.startsWith("disconnecting:") ||
+    row.lastErrorCode?.startsWith("account_deletion_revoke_started") ||
+    row.lastErrorCode === "account_deletion_revoke_completed"
+  ) {
+    throw new ProviderError({
+      code: "connection_removal_in_progress",
+      message: "The provider connection is being removed."
+    });
+  }
+  const credentials = await decodeCredentials(
+    bindings,
+    row.credentialsEncrypted
+  );
+  if (
+    credentials.expiresAt === null ||
+    credentials.expiresAt > Date.now() + 5 * 60 * 1000
+  ) {
+    const [current] = await db
+      .select({
+        credentialsEncrypted: socialConnections.credentialsEncrypted,
+        lastErrorCode: socialConnections.lastErrorCode,
+        status: socialConnections.status
+      })
+      .from(socialConnections)
+      .where(eq(socialConnections.id, row.id))
+      .limit(1);
+    if (
+      current?.credentialsEncrypted !== row.credentialsEncrypted ||
+      current.status !== row.status ||
+      current.lastErrorCode !== row.lastErrorCode
+    ) {
+      throw new ProviderError({
+        code: "credentials_changed",
+        message: "The provider credentials changed before they could be used.",
+        retryable: true
+      });
+    }
+    return {
+      credentials,
+      credentialsEncrypted: row.credentialsEncrypted,
+      lastErrorCode: row.lastErrorCode
+    };
   }
 
   if (
@@ -188,14 +137,18 @@ export const ensureFreshCredentials = async (
         and(
           eq(socialConnections.id, row.id),
           eq(socialConnections.credentialsEncrypted, row.credentialsEncrypted),
-          eq(socialConnections.status, row.status)
+          eq(socialConnections.status, row.status),
+          row.lastErrorCode === null
+            ? isNull(socialConnections.lastErrorCode)
+            : eq(socialConnections.lastErrorCode, row.lastErrorCode)
         )
       )
       .returning({ id: socialConnections.id });
     if (updated.length === 0) {
       throw new ProviderError({
         code: "credentials_changed",
-        message: "The provider credentials changed while expiration was being recorded.",
+        message:
+          "The provider credentials changed while expiration was being recorded.",
         retryable: true
       });
     }
@@ -219,6 +172,9 @@ export const ensureFreshCredentials = async (
         eq(socialConnections.id, row.id),
         eq(socialConnections.credentialsEncrypted, row.credentialsEncrypted),
         eq(socialConnections.status, row.status),
+        row.lastErrorCode === null
+          ? isNull(socialConnections.lastErrorCode)
+          : eq(socialConnections.lastErrorCode, row.lastErrorCode),
         or(
           isNull(socialConnections.refreshLeaseExpiresAt),
           lt(socialConnections.refreshLeaseExpiresAt, leaseStartedAt)
@@ -256,7 +212,10 @@ export const ensureFreshCredentials = async (
             "https://oauth2.googleapis.com/token",
             {
               body: formBody({
-                client_id: requireSecret(bindings.GOOGLE_CLIENT_ID, "GOOGLE_CLIENT_ID"),
+                client_id: requireSecret(
+                  bindings.GOOGLE_CLIENT_ID,
+                  "GOOGLE_CLIENT_ID"
+                ),
                 client_secret: requireSecret(
                   bindings.GOOGLE_CLIENT_SECRET,
                   "GOOGLE_CLIENT_SECRET"
@@ -320,7 +279,10 @@ export const ensureFreshCredentials = async (
             "https://open.tiktokapis.com/v2/oauth/token/",
             {
               body: formBody({
-                client_key: requireSecret(bindings.TIKTOK_CLIENT_KEY, "TIKTOK_CLIENT_KEY"),
+                client_key: requireSecret(
+                  bindings.TIKTOK_CLIENT_KEY,
+                  "TIKTOK_CLIENT_KEY"
+                ),
                 client_secret: requireSecret(
                   bindings.TIKTOK_CLIENT_SECRET,
                   "TIKTOK_CLIENT_SECRET"
@@ -345,17 +307,18 @@ export const ensureFreshCredentials = async (
     }
 
     const now = Date.now();
+    const credentialsEncrypted = await encodeCredentials(bindings, refreshed);
     const updated = await db
       .update(socialConnections)
       .set({
-        credentialsEncrypted: await encodeCredentials(bindings, refreshed),
+        credentialsEncrypted,
         expiresAt: refreshed.expiresAt,
         lastCheckedAt: now,
         lastErrorCode: null,
         lastErrorMessage: null,
         refreshLeaseExpiresAt: null,
         refreshLeaseId: null,
-        status: "connected",
+        status: row.status,
         updatedAt: now
       })
       .where(
@@ -363,6 +326,9 @@ export const ensureFreshCredentials = async (
           eq(socialConnections.id, row.id),
           eq(socialConnections.credentialsEncrypted, row.credentialsEncrypted),
           eq(socialConnections.status, row.status),
+          row.lastErrorCode === null
+            ? isNull(socialConnections.lastErrorCode)
+            : eq(socialConnections.lastErrorCode, row.lastErrorCode),
           eq(socialConnections.refreshLeaseId, leaseId)
         )
       )
@@ -370,11 +336,12 @@ export const ensureFreshCredentials = async (
     if (updated.length === 0) {
       throw new ProviderError({
         code: "credentials_changed",
-        message: "The provider credentials changed while they were being refreshed.",
+        message:
+          "The provider credentials changed while they were being refreshed.",
         retryable: true
       });
     }
-    return refreshed;
+    return { credentials: refreshed, credentialsEncrypted, lastErrorCode: null };
   } catch (error) {
     if (error instanceof ProviderError && error.retryable) {
       await db
@@ -398,14 +365,14 @@ export const ensureFreshCredentials = async (
       .where(eq(socialConnections.id, row.id))
       .limit(1);
     if (
-      latest === undefined ||
-      latest.credentialsEncrypted !== row.credentialsEncrypted ||
+      latest?.credentialsEncrypted !== row.credentialsEncrypted ||
       latest.status !== row.status ||
       latest.refreshLeaseId !== leaseId
     ) {
       throw new ProviderError({
         code: "credentials_changed",
-        message: "The provider credentials changed while they were being refreshed.",
+        message:
+          "The provider credentials changed while they were being refreshed.",
         retryable: true
       });
     }
@@ -424,6 +391,9 @@ export const ensureFreshCredentials = async (
           eq(socialConnections.id, row.id),
           eq(socialConnections.credentialsEncrypted, row.credentialsEncrypted),
           eq(socialConnections.status, row.status),
+          row.lastErrorCode === null
+            ? isNull(socialConnections.lastErrorCode)
+            : eq(socialConnections.lastErrorCode, row.lastErrorCode),
           eq(socialConnections.refreshLeaseId, leaseId)
         )
       )
@@ -431,7 +401,8 @@ export const ensureFreshCredentials = async (
     if (updated.length === 0) {
       throw new ProviderError({
         code: "credentials_changed",
-        message: "The provider credentials changed while they were being refreshed.",
+        message:
+          "The provider credentials changed while they were being refreshed.",
         retryable: true
       });
     }

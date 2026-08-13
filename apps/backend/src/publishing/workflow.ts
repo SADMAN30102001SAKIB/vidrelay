@@ -5,7 +5,7 @@ import {
   type WorkflowStep
 } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { Bindings, PublishWorkflowParams } from "../env";
 import { createDb } from "../db/client";
@@ -252,10 +252,12 @@ export class PublishWorkflow extends WorkflowEntrypoint<
           outcomeUnknown: false,
           status: "starting"
         });
+        const claimed = await loadPublishContext(this.env, destinationId);
+        const started = claimed?.destination.status === "starting";
         return {
           platform: context.destination.platform,
           reconcileOnly,
-          stopped: false
+          stopped: !started
         } satisfies DispatchState;
       }
     );
@@ -295,6 +297,16 @@ export class PublishWorkflow extends WorkflowEntrypoint<
       });
     } catch (error) {
       if (error instanceof NonRetryableError) {
+        const context = await loadPublishContext(this.env, destinationId);
+        if (context === null) {
+          return;
+        }
+        if (
+          context.destination.attemptNumber !== attemptNumber ||
+          terminalStatuses.has(context.destination.status)
+        ) {
+          return;
+        }
         throw error;
       }
       const failure = failureState(error);
@@ -302,21 +314,33 @@ export class PublishWorkflow extends WorkflowEntrypoint<
         const context = await loadPublishContext(this.env, destinationId);
         if (
           context?.destination.attemptNumber !== attemptNumber ||
-          context.destination.status === "cancelled" ||
-          context.destination.status === "published"
+          terminalStatuses.has(context.destination.status)
         ) {
           return { persisted: false };
         }
-        if (failure.status === "reauth_required") {
+        if (
+          failure.status === "reauth_required" &&
+          runtime.credentialsEncryptedUsed !== undefined
+        ) {
           await createDb(this.env.DB)
             .update(socialConnections)
             .set({
               lastErrorCode: failure.code,
-              lastErrorMessage: "Reconnect this account to continue publishing.",
+              lastErrorMessage:
+                "Reconnect this account to continue publishing.",
               status: "reauth_required",
               updatedAt: Date.now()
             })
-            .where(eq(socialConnections.id, context.connection.id));
+            .where(
+              and(
+                eq(socialConnections.id, context.connection.id),
+                eq(
+                  socialConnections.credentialsEncrypted,
+                  runtime.credentialsEncryptedUsed
+                ),
+                eq(socialConnections.status, "connected")
+              )
+            );
         }
         await finishDestination(this.env, {
           attemptNumber,

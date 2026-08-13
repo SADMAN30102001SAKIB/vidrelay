@@ -7,12 +7,12 @@ verified for the actual production application.
 
 The callback base is `PUBLIC_API_ORIGIN`, with no trailing path:
 
-| Platform       | Redirect URI path               | Requested scopes                                                 |
-| -------------- | ------------------------------- | ---------------------------------------------------------------- |
-| Facebook       | `/api/oauth/facebook/callback`  | `pages_show_list`, `pages_read_engagement`, `pages_manage_posts` |
-| Instagram      | `/api/oauth/instagram/callback` | `instagram_business_basic`, `instagram_business_content_publish` |
-| YouTube        | `/api/oauth/youtube/callback`   | `https://www.googleapis.com/auth/youtube.upload`                 |
-| TikTok (later) | `/api/oauth/tiktok/callback`    | `user.info.basic`, `video.publish`                               |
+| Platform  | Redirect URI path               | Requested scopes                                                 |
+| --------- | ------------------------------- | ---------------------------------------------------------------- |
+| Facebook  | `/api/oauth/facebook/callback`  | `pages_show_list`, `pages_read_engagement`, `pages_manage_posts` |
+| Instagram | `/api/oauth/instagram/callback` | `instagram_business_basic`, `instagram_business_content_publish` |
+| YouTube   | `/api/oauth/youtube/callback`   | `https://www.googleapis.com/auth/youtube.upload`                 |
+| TikTok    | `/api/oauth/tiktok/callback`    | `user.info.basic`, `video.publish`                               |
 
 For local provider testing, prepend `http://localhost:4000`. For production,
 prepend the exact deployed API origin configured in `PUBLIC_API_ORIGIN`. Register
@@ -21,18 +21,18 @@ allowed separately in `APP_ORIGINS`.
 
 ## Capability modes
 
-The production variables in `apps/backend/wrangler.jsonc` are enforcement, not
-display-only labels:
+The production variables in the operator's ignored
+`apps/backend/wrangler.production.jsonc` are enforcement, not display-only labels:
 
 - `disabled`: connection and publishing are unavailable.
 - `development_only`: provider roles/test accounts may be used outside production;
   production submission is rejected.
 - `review_pending`: production submission is rejected while review is unresolved.
-- `private_only`: YouTube must use `private` visibility. The TikTok equivalent is
-  reserved for later work.
+- `private_only`: YouTube must use `private` visibility; TikTok must use
+  `SELF_ONLY` and still pass the live creator-info restrictions.
 - `direct_publish`: the provider may receive a publish request under its approved
   visibility and account rules.
-- `inbox_only`: reserved for a future TikTok creator-inbox flow; v1 does not use it.
+- `inbox_only`: connection may be shown, but Direct Post submission is rejected.
 
 Move to `direct_publish` only after approval is visible in the provider console and
 the exact production app/account has passed a controlled test. If approval is
@@ -51,9 +51,10 @@ withdrawn or an incident occurs, disable the capability before investigating.
    console requires them.
 5. Test first with app-role/test users and a non-critical Page.
 
-The connection discovery keeps only Pages for which Meta returns a content-management
-task (`CREATE_CONTENT` or `MANAGE`). It does not connect a personal Facebook
-profile. Confirm the review result for all requested permissions before changing
+The connection discovery records Pages and marks them publishable only when Meta
+returns a content-management task, including the New Pages Experience
+`PROFILE_PLUS_*` task family. It does not connect a personal Facebook profile.
+Confirm the review result for all requested permissions before changing
 `FACEBOOK_CAPABILITY`.
 
 References: [Meta Reels publishing](https://developers.facebook.com/docs/video-api/guides/reels-publishing/),
@@ -103,22 +104,23 @@ not treat a working consent screen as permission for public publishing.
 References: [`videos.insert`](https://developers.google.com/youtube/v3/docs/videos/insert),
 [video upload implementation guide](https://developers.google.com/youtube/v3/guides/implementation/videos).
 
-## TikTok is not a v1 provider
+## TikTok
 
-The repository contains future-facing TikTok contracts, secret names, and
-publishing plumbing. That does not make TikTok a launched or approved provider.
-For the first release:
+TikTok Direct Post is implemented but must remain capability-gated. Before it is
+enabled, add the Content Posting API product, obtain the `video.publish` scope,
+configure the exact redirect and signed webhook, verify the media URL domain, and
+complete the applicable Direct Post audit.
 
-- leave `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` unset;
-- set the production `TIKTOK_CAPABILITY` to `disabled` before release;
-- do not include TikTok in marketing, review evidence, or acceptance tests; and
-- do not register webhook or redirect URLs for a feature not being launched.
+The compose UI and backend query current creator information rather than assuming
+capabilities. The user must select a returned privacy option, see the target
+creator, confirm the preview/music rights, and make the required commercial and
+AI-content disclosures. Comments, duet, and stitch remain opt-in and are disabled
+when the provider says they are unavailable. `private_only` additionally enforces
+`SELF_ONLY`; it is a test/review restriction, not evidence of production approval.
 
-A later release would require the Content Posting API product, approved
-`video.publish` scope, Direct Post audit, creator-info checks, user-facing consent
-and disclosure controls, and TikTok's current posting caps. Unaudited Direct Post
-clients are private-only and constrained; those limitations are not a viable
-substitute for approval.
+If TikTok is excluded from a particular customer release, leave both credentials
+unset and set `TIKTOK_CAPABILITY=disabled`. Do not market it or register its
+callbacks for that release.
 
 References: [TikTok Content Posting API setup](https://developers.tiktok.com/doc/content-posting-api-get-started/),
 [TikTok content-sharing guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines/).
@@ -137,6 +139,10 @@ References: [TikTok Content Posting API setup](https://developers.tiktok.com/doc
 - The capability remains gated until approval and a production smoke test are
   recorded with date, app/project ID, reviewer, and result.
 
-The `.dev.vars.example` file reserves webhook secrets, but the current API has no
-provider webhook route. Do not register a webhook callback or claim webhook-driven
-status until that lifecycle is implemented, authenticated, tested, and documented.
+The API exposes signed Meta and TikTok webhook routes under `/api/webhooks`.
+Register them only for an enabled provider and set the corresponding
+verification/signing secret. The current Meta POST callback verifies, deduplicates,
+and records deliveries as ignored; it does **not** drive destination status, so
+Workflow polling remains authoritative for Facebook and Instagram. TikTok status
+events do update matching destinations. Run provider-console delivery tests and
+the end-to-end status path before relying on either integration.

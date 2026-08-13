@@ -2,7 +2,7 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["https://app.example.com"],
+        "origins": ["REPLACE_WITH_EXACT_FRONTEND_ORIGIN"],
         "methods": ["PUT"],
         "headers": ["Content-Type"]
       },

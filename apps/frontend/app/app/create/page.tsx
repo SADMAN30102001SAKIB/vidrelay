@@ -11,7 +11,6 @@ import type {
   Platform,
   Post,
   PostDestinationInput,
-  PublicConfig,
   Upload
 } from "@vidrelay/shared";
 import type { FormEvent } from "react";
@@ -27,16 +26,16 @@ import {
   StatusBadge
 } from "@/components/ui";
 import { apiRequest, errorMessage } from "@/lib/api";
+import {
+  cannotPublish,
+  privateTikTokAccountEligible,
+  resolveTikTokPrivacy
+} from "@/lib/publishing";
+import type { TikTokPrivacy, TikTokPrivacyOption } from "@/lib/publishing";
 import { capabilityStatusView } from "@/lib/status";
 import { useSession } from "@/providers/SessionProvider";
 
 type ConnectionSelection = Partial<Record<Platform, string>>;
-type TikTokPrivacy =
-  | ""
-  | "FOLLOWER_OF_CREATOR"
-  | "MUTUAL_FOLLOW_FRIENDS"
-  | "PUBLIC_TO_EVERYONE"
-  | "SELF_ONLY";
 
 interface TikTokCreatorInfo {
   comment_disabled: boolean;
@@ -44,26 +43,9 @@ interface TikTokCreatorInfo {
   creator_nickname: string;
   duet_disabled: boolean;
   max_video_post_duration_sec: number;
-  privacy_level_options: Exclude<TikTokPrivacy, "">[];
+  privacy_level_options: TikTokPrivacyOption[];
   stitch_disabled: boolean;
 }
-
-const cannotPublish = (
-  capability: Capability | undefined,
-  environment: PublicConfig["environment"] | undefined
-): boolean =>
-  capability === undefined ||
-  !capability.configured ||
-  ["disabled", "review_pending", "inbox_only"].includes(capability.mode) ||
-  (capability.mode === "development_only" && environment !== "development");
-
-const privateTikTokAccountEligible = (
-  creatorInfo: TikTokCreatorInfo | null
-): boolean =>
-  creatorInfo !== null &&
-  creatorInfo.privacy_level_options.includes("SELF_ONLY") &&
-  creatorInfo.privacy_level_options.includes("FOLLOWER_OF_CREATOR") &&
-  !creatorInfo.privacy_level_options.includes("PUBLIC_TO_EVERYONE");
 
 export default function CreatePostPage() {
   const { config } = useSession();
@@ -89,10 +71,12 @@ export default function CreatePostPage() {
   const [youtubeSynthetic, setYoutubeSynthetic] = useState(false);
   const [tiktokTitle, setTiktokTitle] = useState("");
   const [tiktokPrivacy, setTiktokPrivacy] = useState<TikTokPrivacy>("");
-  const [tiktokComments, setTiktokComments] = useState(true);
-  const [tiktokDuet, setTiktokDuet] = useState(true);
-  const [tiktokStitch, setTiktokStitch] = useState(true);
+  const [tiktokComments, setTiktokComments] = useState(false);
+  const [tiktokDuet, setTiktokDuet] = useState(false);
+  const [tiktokStitch, setTiktokStitch] = useState(false);
   const [tiktokAi, setTiktokAi] = useState(false);
+  const [tiktokCommercialContent, setTiktokCommercialContent] =
+    useState(false);
   const [tiktokOwnBrand, setTiktokOwnBrand] = useState(false);
   const [tiktokBranded, setTiktokBranded] = useState(false);
   const [tiktokConsent, setTiktokConsent] = useState(false);
@@ -100,6 +84,7 @@ export default function CreatePostPage() {
     null
   );
   const [creatorLoading, setCreatorLoading] = useState(false);
+  const [creatorError, setCreatorError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -123,9 +108,21 @@ export default function CreatePostPage() {
 
   useEffect(() => {
     const connectionId = selected.tiktok;
+    setCreatorInfo(null);
+    setCreatorError(null);
+    setTiktokPrivacy("");
+    setTiktokComments(false);
+    setTiktokDuet(false);
+    setTiktokStitch(false);
+    setTiktokCommercialContent(false);
+    setTiktokOwnBrand(false);
+    setTiktokBranded(false);
+    setTiktokConsent(false);
     if (connectionId === undefined) {
+      setCreatorLoading(false);
       return;
     }
+    setCreatorLoading(true);
     let cancelled = false;
     void apiRequest<{ creatorInfo: TikTokCreatorInfo }>(
       `/api/connections/${connectionId}/tiktok/creator-info`,
@@ -135,24 +132,15 @@ export default function CreatePostPage() {
         if (cancelled) {
           return;
         }
+        setCreatorError(null);
         setCreatorInfo(body.creatorInfo);
-        setTiktokComments(!body.creatorInfo.comment_disabled);
-        setTiktokDuet(!body.creatorInfo.duet_disabled);
-        setTiktokStitch(!body.creatorInfo.stitch_disabled);
-        setTiktokPrivacy(current =>
-          body.creatorInfo.privacy_level_options.includes(
-            current as Exclude<TikTokPrivacy, "">
-          )
-            ? current
-            : ""
-        );
       })
       .catch((caught: unknown) => {
         if (cancelled) {
           return;
         }
         setCreatorInfo(null);
-        setError(errorMessage(caught));
+        setCreatorError(errorMessage(caught));
       })
       .finally(() => {
         if (!cancelled) {
@@ -185,10 +173,6 @@ export default function CreatePostPage() {
   const togglePlatform = (platform: Platform) => {
     const current = selected[platform];
     if (current !== undefined) {
-      if (platform === "tiktok") {
-        setCreatorInfo(null);
-        setCreatorLoading(false);
-      }
       setSelected(value => {
         const next = { ...value };
         delete next[platform];
@@ -198,20 +182,19 @@ export default function CreatePostPage() {
     }
     const first = connectedByPlatform[platform][0];
     if (first !== undefined) {
-      if (platform === "tiktok") {
-        setCreatorLoading(true);
-      }
       setSelected(value => ({ ...value, [platform]: first.id }));
     }
   };
 
   const selectConnection = (platform: Platform, id: string) => {
-    if (platform === "tiktok") {
-      setCreatorInfo(null);
-      setCreatorLoading(true);
-    }
     setSelected(current => ({ ...current, [platform]: id }));
   };
+
+  const effectiveTikTokPrivacy = resolveTikTokPrivacy(
+    capabilityFor("tiktok")?.mode,
+    creatorInfo,
+    tiktokPrivacy
+  );
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -258,14 +241,6 @@ export default function CreatePostPage() {
         }
       });
     }
-    const effectiveTikTokPrivacy: Exclude<TikTokPrivacy, ""> | null =
-      capabilityFor("tiktok")?.mode === "private_only"
-        ? creatorInfo?.privacy_level_options.includes("SELF_ONLY") === true
-          ? "SELF_ONLY"
-          : null
-        : tiktokPrivacy === ""
-          ? null
-          : tiktokPrivacy;
     if (selected.tiktok !== undefined && effectiveTikTokPrivacy !== null) {
       destinations.push({
         connectionId: selected.tiktok,
@@ -289,6 +264,26 @@ export default function CreatePostPage() {
       return;
     }
     if (
+      selected.instagram !== undefined &&
+      instagramCaption.trim() === "" &&
+      sharedCaption.length > 2200
+    ) {
+      setError(
+        "Instagram captions can contain at most 2,200 characters. Add a shorter Instagram override."
+      );
+      return;
+    }
+    if (
+      selected.tiktok !== undefined &&
+      tiktokTitle.trim() === "" &&
+      sharedCaption.length > 2200
+    ) {
+      setError(
+        "TikTok captions can contain at most 2,200 characters. Add a shorter TikTok override."
+      );
+      return;
+    }
+    if (
       selected.tiktok !== undefined &&
       effectiveTikTokPrivacy === "SELF_ONLY" &&
       tiktokBranded
@@ -306,6 +301,12 @@ export default function CreatePostPage() {
       );
       return;
     }
+    if (selected.tiktok !== undefined && effectiveTikTokPrivacy === null) {
+      setError(
+        "Choose a TikTok privacy option that is currently available for this account."
+      );
+      return;
+    }
     if (
       selected.tiktok !== undefined &&
       creatorInfo !== null &&
@@ -317,15 +318,20 @@ export default function CreatePostPage() {
       );
       return;
     }
-    if (
-      selected.tiktok !== undefined &&
-      (creatorInfo === null ||
-        (tiktokPrivacy === "" &&
-          capabilityFor("tiktok")?.mode !== "private_only") ||
-        !tiktokConsent)
-    ) {
+    if (selected.tiktok !== undefined && !tiktokConsent) {
       setError(
         "Choose TikTok privacy and confirm TikTok’s publishing consent."
+      );
+      return;
+    }
+    if (
+      selected.tiktok !== undefined &&
+      tiktokCommercialContent &&
+      !tiktokOwnBrand &&
+      !tiktokBranded
+    ) {
+      setError(
+        "Choose Your brand, Branded content, or both for TikTok commercial content."
       );
       return;
     }
@@ -400,7 +406,13 @@ export default function CreatePostPage() {
                 </p>
               </div>
             </div>
-            <VideoUploader config={config} onUploadChange={setUpload} />
+            <VideoUploader
+              config={config}
+              onUploadChange={value => {
+                setUpload(value);
+                setTiktokConsent(false);
+              }}
+            />
           </section>
 
           <section className="panel stack" aria-labelledby="caption-heading">
@@ -414,7 +426,12 @@ export default function CreatePostPage() {
                 className="textarea"
                 id="shared-caption"
                 maxLength={5000}
-                onChange={event => setSharedCaption(event.target.value)}
+                onChange={event => {
+                  setSharedCaption(event.target.value);
+                  if (tiktokTitle.trim() === "") {
+                    setTiktokConsent(false);
+                  }
+                }}
                 rows={5}
                 value={sharedCaption}
               />
@@ -693,8 +710,8 @@ export default function CreatePostPage() {
                       ) : null}
                       {creatorInfo === null && !creatorLoading ? (
                         <Notice tone="warning">
-                          TikTok creator controls are unavailable. Recheck or
-                          reconnect this account before publishing.
+                          {creatorError ??
+                            "TikTok creator controls are unavailable. Recheck or reconnect this account before publishing."}
                         </Notice>
                       ) : null}
                       {capabilityFor("tiktok")?.mode === "private_only" ? (
@@ -712,13 +729,22 @@ export default function CreatePostPage() {
                           be submitted.
                         </Notice>
                       ) : null}
+                      {creatorInfo === null ? null : (
+                        <Notice tone="info">
+                          Posting to the TikTok account owned by{" "}
+                          <strong>{creatorInfo.creator_nickname}</strong>.
+                        </Notice>
+                      )}
                       <div className="field">
                         <label htmlFor="tiktok-title">Caption</label>
                         <textarea
                           className="textarea"
                           id="tiktok-title"
                           maxLength={2200}
-                          onChange={event => setTiktokTitle(event.target.value)}
+                          onChange={event => {
+                            setTiktokTitle(event.target.value);
+                            setTiktokConsent(false);
+                          }}
                           placeholder="Leave empty to use the shared caption"
                           rows={4}
                           value={tiktokTitle}
@@ -731,26 +757,19 @@ export default function CreatePostPage() {
                         <label htmlFor="tiktok-privacy">Who can view</label>
                         <select
                           className="select"
-                          disabled={
-                            creatorInfo === null ||
-                            capabilityFor("tiktok")?.mode === "private_only"
-                          }
+                          disabled={creatorInfo === null}
                           id="tiktok-privacy"
-                          onChange={event =>
-                            setTiktokPrivacy(
-                              event.target.value as TikTokPrivacy
-                            )
-                          }
-                           required
-                           value={
-                             capabilityFor("tiktok")?.mode === "private_only"
-                               ? creatorInfo?.privacy_level_options.includes(
-                                   "SELF_ONLY"
-                                 ) === true
-                                 ? "SELF_ONLY"
-                                 : ""
-                               : tiktokPrivacy
-                           }>
+                          onChange={event => {
+                            const privacy = event.target
+                              .value as TikTokPrivacy;
+                            setTiktokPrivacy(privacy);
+                            if (privacy === "SELF_ONLY") {
+                              setTiktokBranded(false);
+                            }
+                            setTiktokConsent(false);
+                          }}
+                          required
+                          value={tiktokPrivacy}>
                           <option value="">Choose privacy</option>
                           {(creatorInfo?.privacy_level_options ?? []).map(
                             option => (
@@ -767,9 +786,10 @@ export default function CreatePostPage() {
                           <input
                             checked={tiktokComments}
                             disabled={creatorInfo?.comment_disabled === true}
-                            onChange={event =>
-                              setTiktokComments(event.target.checked)
-                            }
+                            onChange={event => {
+                              setTiktokComments(event.target.checked);
+                              setTiktokConsent(false);
+                            }}
                             type="checkbox"
                           />{" "}
                           Allow comments
@@ -778,9 +798,10 @@ export default function CreatePostPage() {
                           <input
                             checked={tiktokDuet}
                             disabled={creatorInfo?.duet_disabled === true}
-                            onChange={event =>
-                              setTiktokDuet(event.target.checked)
-                            }
+                            onChange={event => {
+                              setTiktokDuet(event.target.checked);
+                              setTiktokConsent(false);
+                            }}
                             type="checkbox"
                           />{" "}
                           Allow Duet
@@ -789,9 +810,10 @@ export default function CreatePostPage() {
                           <input
                             checked={tiktokStitch}
                             disabled={creatorInfo?.stitch_disabled === true}
-                            onChange={event =>
-                              setTiktokStitch(event.target.checked)
-                            }
+                            onChange={event => {
+                              setTiktokStitch(event.target.checked);
+                              setTiktokConsent(false);
+                            }}
                             type="checkbox"
                           />{" "}
                           Allow Stitch
@@ -802,46 +824,121 @@ export default function CreatePostPage() {
                         <label className="check-row">
                           <input
                             checked={tiktokAi}
-                            onChange={event =>
-                              setTiktokAi(event.target.checked)
-                            }
+                            onChange={event => {
+                              setTiktokAi(event.target.checked);
+                              setTiktokConsent(false);
+                            }}
                             type="checkbox"
                           />{" "}
                           AI-generated content
                         </label>
                         <label className="check-row">
                           <input
-                            checked={tiktokOwnBrand}
-                            onChange={event =>
-                              setTiktokOwnBrand(event.target.checked)
-                            }
+                            checked={tiktokCommercialContent}
+                            onChange={event => {
+                              const enabled = event.target.checked;
+                              setTiktokCommercialContent(enabled);
+                              if (!enabled) {
+                                setTiktokOwnBrand(false);
+                                setTiktokBranded(false);
+                              }
+                              setTiktokConsent(false);
+                            }}
                             type="checkbox"
                           />{" "}
-                          Promotes my own brand
+                          This content promotes myself, a brand, product, or
+                          service
                         </label>
-                        <label className="check-row">
-                          <input
-                            checked={tiktokBranded}
-                            onChange={event =>
-                              setTiktokBranded(event.target.checked)
-                            }
-                            type="checkbox"
-                          />{" "}
-                          Paid partnership or branded content
-                        </label>
+                        {tiktokCommercialContent ? (
+                          <div className="stack stack-tight">
+                            <label className="check-row">
+                              <input
+                                checked={tiktokOwnBrand}
+                                onChange={event => {
+                                  setTiktokOwnBrand(event.target.checked);
+                                  setTiktokConsent(false);
+                                }}
+                                type="checkbox"
+                              />{" "}
+                              Your brand
+                            </label>
+                            <label className="check-row">
+                              <input
+                                checked={tiktokBranded}
+                                disabled={tiktokPrivacy === "SELF_ONLY"}
+                                onChange={event => {
+                                  setTiktokBranded(event.target.checked);
+                                  setTiktokConsent(false);
+                                }}
+                                type="checkbox"
+                              />{" "}
+                              Branded content
+                            </label>
+                            {!tiktokOwnBrand && !tiktokBranded ? (
+                              <Notice tone="warning">
+                                Choose Your brand, Branded content, or both to
+                                continue.
+                              </Notice>
+                            ) : null}
+                            {tiktokBranded ? (
+                              <Notice tone="info">
+                                Your video will be labeled as “Paid
+                                partnership”.
+                              </Notice>
+                            ) : tiktokOwnBrand ? (
+                              <Notice tone="info">
+                                Your video will be labeled as “Promotional
+                                content”.
+                              </Notice>
+                            ) : null}
+                            {tiktokPrivacy === "SELF_ONLY" ? (
+                              <Notice tone="info">
+                                Branded content cannot use Only me visibility.
+                              </Notice>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </fieldset>
-                      <label className="check-row">
+                      <div className="check-row">
                         <input
+                          aria-describedby="tiktok-consent-policy"
                           checked={tiktokConsent}
+                          id="tiktok-consent"
                           onChange={event =>
                             setTiktokConsent(event.target.checked)
                           }
                           required
                           type="checkbox"
                         />{" "}
-                        I consent to publish this video to TikTok with these
-                        privacy and disclosure settings.
-                      </label>
+                        <label htmlFor="tiktok-consent">
+                          Confirm TikTok publishing consent.
+                        </label>
+                      </div>
+                      <p className="form-help" id="tiktok-consent-policy">
+                        By posting, you agree to TikTok’s{" "}
+                        {tiktokBranded ? (
+                          <>
+                            <a
+                              href="https://www.tiktok.com/legal/page/global/bc-policy/en"
+                              rel="noreferrer"
+                              target="_blank">
+                              Branded Content Policy
+                            </a>{" "}
+                            and{" "}
+                          </>
+                        ) : null}
+                        <a
+                          href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+                          rel="noreferrer"
+                          target="_blank">
+                          Music Usage Confirmation
+                        </a>
+                        .
+                      </p>
+                      <Notice tone="info">
+                        TikTok may take a few minutes to process the video and
+                        make it visible on your profile after submission.
+                      </Notice>
                     </>
                   ) : null}
                 </div>
@@ -905,10 +1002,22 @@ export default function CreatePostPage() {
               selectedPlatforms.length === 0 ||
               !rightsConfirmed ||
               (selected.tiktok !== undefined &&
-                  (creatorInfo === null ||
-                    creatorLoading ||
-                    (capabilityFor("tiktok")?.mode === "private_only" &&
-                      !privateTikTokAccountEligible(creatorInfo))))
+                (creatorInfo === null ||
+                  creatorLoading ||
+                  effectiveTikTokPrivacy === null ||
+                  !tiktokConsent ||
+                  (tiktokCommercialContent &&
+                    !tiktokOwnBrand &&
+                    !tiktokBranded) ||
+                  (effectiveTikTokPrivacy === "SELF_ONLY" &&
+                    tiktokBranded) ||
+                  (upload !== null &&
+                    upload.durationMs !== null &&
+                    creatorInfo !== null &&
+                    upload.durationMs / 1000 >
+                      creatorInfo.max_video_post_duration_sec) ||
+                  (capabilityFor("tiktok")?.mode === "private_only" &&
+                    !privateTikTokAccountEligible(creatorInfo))))
             }
             type="submit"
             wide>

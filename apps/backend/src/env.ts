@@ -1,5 +1,6 @@
 export interface SecretBindings {
   AUDIT_HASH_SECRET?: string;
+  BOOTSTRAP_SIGNUP_TOKEN?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   INSTAGRAM_APP_ID?: string;
@@ -57,7 +58,10 @@ export interface AppEnv {
   Variables: Variables;
 }
 
-export const requireSecret = (value: string | undefined, name: string): string => {
+export const requireSecret = (
+  value: string | undefined,
+  name: string
+): string => {
   if (value === undefined || value.length === 0) {
     throw new Error(name + " is not configured.");
   }

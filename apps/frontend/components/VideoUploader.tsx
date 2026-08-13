@@ -235,11 +235,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
   };
 
   const upload = async () => {
-    if (
-      uploadInFlightRef.current ||
-      file === null ||
-      facts === null
-    ) {
+    if (uploadInFlightRef.current || file === null || facts === null) {
       return;
     }
     uploadInFlightRef.current = true;
@@ -272,21 +268,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
         };
         activeSessionRef.current = workingSession;
         if (cancelRequestedRef.current || controller.signal.aborted) {
-          try {
-            await apiRequest<unknown>(`/api/uploads/${workingSession.id}`, {
-              method: "DELETE"
-            });
-            activeSessionRef.current = null;
-            cancelRequestedRef.current = false;
-            clearSelection();
-          } catch (caught) {
-            setSession(workingSession);
-            persistUpload(workingSession);
-            cancelRequestedRef.current = false;
-            setPhase("error");
-            setError(errorMessage(caught));
-          }
-          return;
+          throw new DOMException("The upload was cancelled.", "AbortError");
         }
         setServerUpload(body.upload);
         setSession(workingSession);
@@ -408,7 +390,23 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
       }
     } catch (caught) {
       if (cancelRequestedRef.current) {
-        if (activeSessionRef.current === null) {
+        const cancelledSession = activeSessionRef.current;
+        if (cancelledSession !== null) {
+          try {
+            await apiRequest<unknown>(`/api/uploads/${cancelledSession.id}`, {
+              method: "DELETE"
+            });
+          } catch (deleteError) {
+            setSession(cancelledSession);
+            persistUpload(cancelledSession);
+            cancelRequestedRef.current = false;
+            setPhase("error");
+            setError(errorMessage(deleteError));
+            return;
+          }
+        }
+        activeSessionRef.current = null;
+        if (cancelRequestedRef.current) {
           cancelRequestedRef.current = false;
           clearSelection();
         }
@@ -425,7 +423,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
   };
 
   const cancel = async () => {
-    if (phase === "cancelling") {
+    if (cancelRequestedRef.current || phase === "cancelling") {
       return;
     }
     cancelRequestedRef.current = true;
@@ -433,6 +431,9 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
     setError(null);
     abortRef.current?.abort();
     const activeSession = activeSessionRef.current ?? session;
+    if (uploadInFlightRef.current) {
+      return;
+    }
     if (activeSession !== null) {
       try {
         await apiRequest<unknown>(`/api/uploads/${activeSession.id}`, {
@@ -553,10 +554,10 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
               {phase === "cancelling"
                 ? "Cancelling upload…"
                 : phase === "verifying"
-                ? "Verifying media…"
-                : phase === "ready"
-                  ? "Media verified"
-                  : "Uploading parts…"}
+                  ? "Verifying media…"
+                  : phase === "ready"
+                    ? "Media verified"
+                    : "Uploading parts…"}
             </span>
             <strong>{progress}%</strong>
           </div>

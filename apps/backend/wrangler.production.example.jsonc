@@ -1,0 +1,63 @@
+{
+  // Release gate: this Workflow design requires Workers Paid; see docs/OPERATIONS.md.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "vidrelay-api-production",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+  "vars": {
+    "APP_ENV": "production",
+    "APP_ORIGINS": "REPLACE_WITH_EXACT_FRONTEND_ORIGIN",
+    "PUBLIC_APP_ORIGIN": "REPLACE_WITH_EXACT_FRONTEND_ORIGIN",
+    "PUBLIC_API_ORIGIN": "REPLACE_WITH_EXACT_API_ORIGIN",
+    "ALLOW_SIGNUPS": "false",
+    "UPLOAD_MODE": "direct",
+    "R2_BUCKET_NAME": "vidrelay-media-production",
+    "META_GRAPH_VERSION": "v25.0",
+    "FACEBOOK_CAPABILITY": "review_pending",
+    "INSTAGRAM_CAPABILITY": "review_pending",
+    "YOUTUBE_CAPABILITY": "private_only",
+    "TIKTOK_CAPABILITY": "private_only"
+  },
+  "secrets": {
+    "required": [
+      "TOKEN_ENCRYPTION_KEY",
+      "MEDIA_LEASE_SECRET",
+      "AUDIT_HASH_SECRET",
+      "R2_ACCOUNT_ID",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vidrelay-production",
+      "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "vidrelay-media-production"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "vidrelay-publish-production",
+      "binding": "PUBLISH_WORKFLOW",
+      "class_name": "PublishWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}

@@ -15,7 +15,10 @@ const hex = (bytes: Uint8Array): string =>
 const sha256Hex = async (value: string): Promise<string> =>
   hex(
     new Uint8Array(
-      await crypto.subtle.digest("SHA-256", toArrayBuffer(encoder.encode(value)))
+      await crypto.subtle.digest(
+        "SHA-256",
+        toArrayBuffer(encoder.encode(value))
+      )
     )
   );
 
@@ -28,13 +31,18 @@ const hmac = async (key: Uint8Array, value: string): Promise<Uint8Array> => {
     ["sign"]
   );
   return new Uint8Array(
-    await crypto.subtle.sign("HMAC", imported, toArrayBuffer(encoder.encode(value)))
+    await crypto.subtle.sign(
+      "HMAC",
+      imported,
+      toArrayBuffer(encoder.encode(value))
+    )
   );
 };
 
 const awsEncode = (value: string): string =>
-  encodeURIComponent(value).replace(/[!'()*]/g, character =>
-    "%" + character.charCodeAt(0).toString(16).toUpperCase()
+  encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    character => "%" + character.charCodeAt(0).toString(16).toUpperCase()
   );
 
 const canonicalPath = (bucket: string, key: string): string =>
@@ -61,7 +69,10 @@ const timestamp = (date: Date): { date: string; value: string } => {
   return { date: value.slice(0, 8), value };
 };
 
-const signingKey = async (secret: string, date: string): Promise<Uint8Array> => {
+const signingKey = async (
+  secret: string,
+  date: string
+): Promise<Uint8Array> => {
   const day = await hmac(encoder.encode("AWS4" + secret), date);
   const region = await hmac(day, "auto");
   const service = await hmac(region, "s3");
@@ -116,13 +127,19 @@ export const presignR2UploadPart = async (
   const time = timestamp(input.now ?? new Date());
   const scope = time.date + "/auto/s3/aws4_request";
   url.searchParams.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
-  url.searchParams.set("X-Amz-Credential", credentials.accessKeyId + "/" + scope);
+  url.searchParams.set(
+    "X-Amz-Credential",
+    credentials.accessKeyId + "/" + scope
+  );
   url.searchParams.set("X-Amz-Date", time.value);
   url.searchParams.set(
     "X-Amz-Expires",
     String(Math.min(Math.max(input.expiresSeconds ?? 900, 1), 604800))
   );
-  url.searchParams.set("X-Amz-SignedHeaders", "content-length;content-type;host");
+  url.searchParams.set(
+    "X-Amz-SignedHeaders",
+    "content-length;content-type;host"
+  );
 
   const canonicalHeaders =
     "content-length:" +
@@ -145,7 +162,10 @@ export const presignR2UploadPart = async (
     await sha256Hex(canonicalRequest)
   ].join("\n");
   const signature = hex(
-    await hmac(await signingKey(credentials.secretAccessKey, time.date), stringToSign)
+    await hmac(
+      await signingKey(credentials.secretAccessKey, time.date),
+      stringToSign
+    )
   );
   url.searchParams.set("X-Amz-Signature", signature);
   return url.toString();
@@ -193,7 +213,10 @@ const signedR2Request = async (
     await sha256Hex(canonicalRequest)
   ].join("\n");
   const signature = hex(
-    await hmac(await signingKey(credentials.secretAccessKey, time.date), stringToSign)
+    await hmac(
+      await signingKey(credentials.secretAccessKey, time.date),
+      stringToSign
+    )
   );
   const headers = new Headers({
     Authorization:
@@ -224,14 +247,19 @@ const signedR2Request = async (
 
 const xmlValue = (xml: string, tag: string): string | null => {
   const match = new RegExp("<" + tag + ">([^<]+)</" + tag + ">").exec(xml);
-  return match?.[1]
-    ?.replaceAll("&amp;", "&")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"') ?? null;
+  return (
+    match?.[1]
+      ?.replaceAll("&amp;", "&")
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">")
+      .replaceAll("&quot;", '"') ?? null
+  );
 };
 
-const assertR2Response = async (response: Response, operation: string): Promise<string> => {
+const assertR2Response = async (
+  response: Response,
+  operation: string
+): Promise<string> => {
   const body = await response.text();
   if (!response.ok) {
     throw new Error(

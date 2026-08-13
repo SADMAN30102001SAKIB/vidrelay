@@ -1,11 +1,21 @@
 "use client";
 
-import { ExternalLink, RefreshCw, RotateCcw, SearchCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  ExternalLink,
+  RefreshCw,
+  RotateCcw,
+  SearchCheck,
+  Trash2,
+  XCircle
+} from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
+import { platformLabels, resolveDestinationSchema } from "@vidrelay/shared";
 import type { Destination, Post } from "@vidrelay/shared";
+import type { FormEvent } from "react";
 
 import {
   Button,
@@ -52,6 +62,145 @@ interface PreviewLease {
 const retryable = (destination: Destination): boolean =>
   ["failed_permanent", "unavailable"].includes(destination.status);
 
+const abandonable = (destination: Destination): boolean =>
+  [
+    "awaiting_user_action",
+    "blocked",
+    "failed_permanent",
+    "unavailable"
+  ].includes(destination.status);
+
+type ManualResolution =
+  | {
+      acknowledgement: "I CHECKED THE PROVIDER";
+      outcome: "not_published";
+    }
+  | {
+      acknowledgement: "I CHECKED THE PROVIDER";
+      outcome: "published";
+      providerPostId?: string;
+      providerUrl?: string;
+    };
+
+function ManualResolutionControls({
+  busy,
+  destination,
+  onResolve
+}: {
+  busy: boolean;
+  destination: Destination;
+  onResolve: (input: ManualResolution) => Promise<void>;
+}) {
+  const [acknowledgement, setAcknowledgement] = useState("");
+  const [providerPostId, setProviderPostId] = useState("");
+  const [providerUrl, setProviderUrl] = useState("");
+  const acknowledged = acknowledgement === "I CHECKED THE PROVIDER";
+  const providerName = platformLabels[destination.platform];
+
+  const confirmNotPublished = () => {
+    if (
+      !acknowledged ||
+      !window.confirm(
+        `Confirm that you personally inspected the connected ${providerName} account and this video was not published? This makes a new retry available and could create a duplicate if the post actually exists.`
+      )
+    ) {
+      return;
+    }
+    void onResolve({
+      acknowledgement: "I CHECKED THE PROVIDER",
+      outcome: "not_published"
+    });
+  };
+
+  const confirmPublished = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (
+      !acknowledged ||
+      !window.confirm(
+        `Confirm that you personally found this video published in the connected ${providerName} account? VidRelay will record this destination as published and will not upload it again.`
+      )
+    ) {
+      return;
+    }
+    void onResolve({
+      acknowledgement: "I CHECKED THE PROVIDER",
+      outcome: "published",
+      ...(providerPostId.trim() === ""
+        ? {}
+        : { providerPostId: providerPostId.trim() }),
+      ...(providerUrl.trim() === "" ? {} : { providerUrl: providerUrl.trim() })
+    });
+  };
+
+  return (
+    <div className="stack">
+      <Notice title="Manual provider check required" tone="warning">
+        VidRelay has no reliable provider identifier for this attempt. Open the
+        connected {providerName} account separately and inspect its posts for
+        this exact video. Do not choose an outcome from memory or guesswork.
+      </Notice>
+      <div className="field">
+        <label htmlFor={`manual-acknowledgement-${destination.id}`}>
+          Type I CHECKED THE PROVIDER to unlock these actions
+        </label>
+        <input
+          autoComplete="off"
+          className="input"
+          id={`manual-acknowledgement-${destination.id}`}
+          onChange={event => setAcknowledgement(event.target.value)}
+          spellCheck={false}
+          value={acknowledgement}
+        />
+      </div>
+      <Button
+        disabled={!acknowledged || busy}
+        onClick={confirmNotPublished}
+        size="small"
+        type="button"
+        variant="secondary">
+        <XCircle aria-hidden="true" size={14} /> Confirm not published
+      </Button>
+      <form className="stack" onSubmit={confirmPublished}>
+        <div className="field">
+          <label htmlFor={`provider-post-id-${destination.id}`}>
+            Provider post ID (optional published evidence)
+          </label>
+          <input
+            autoComplete="off"
+            className="input"
+            id={`provider-post-id-${destination.id}`}
+            maxLength={256}
+            onChange={event => setProviderPostId(event.target.value)}
+            value={providerPostId}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor={`provider-post-url-${destination.id}`}>
+            Provider post URL (optional published evidence)
+          </label>
+          <input
+            autoComplete="url"
+            className="input"
+            id={`provider-post-url-${destination.id}`}
+            onChange={event => setProviderUrl(event.target.value)}
+            placeholder="https://…"
+            type="url"
+            value={providerUrl}
+          />
+        </div>
+        <Button
+          busy={busy}
+          disabled={!acknowledged}
+          size="small"
+          type="submit"
+          variant="danger">
+          <CheckCircle2 aria-hidden="true" size={14} /> Confirm published
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 function PostDetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
@@ -64,6 +213,7 @@ function PostDetailContent() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [removingSource, setRemovingSource] = useState(false);
   const leaseUploadRef = useRef<string | null>(null);
 
   const loadPreview = useCallback(async (uploadId: string) => {
@@ -95,7 +245,12 @@ function PostDetailContent() {
       );
       setDetail(body);
       setError(null);
-      void loadPreview(body.post.upload.id);
+      if (body.post.upload.status === "ready") {
+        void loadPreview(body.post.upload.id);
+      } else {
+        setLease(null);
+        leaseUploadRef.current = null;
+      }
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -117,7 +272,12 @@ function PostDetailContent() {
         if (!cancelled) {
           setDetail(body);
           setError(null);
-          void loadPreview(body.post.upload.id);
+          if (body.post.upload.status === "ready") {
+            void loadPreview(body.post.upload.id);
+          } else {
+            setLease(null);
+            leaseUploadRef.current = null;
+          }
         }
       })
       .catch((caught: unknown) => {
@@ -179,6 +339,62 @@ function PostDetailContent() {
     }
   };
 
+  const resolveManually = async (
+    destination: Destination,
+    input: ManualResolution
+  ) => {
+    const parsed = resolveDestinationSchema.safeParse(input);
+    if (!parsed.success) {
+      setError("Review the manual provider evidence before continuing.");
+      return;
+    }
+    setActionId(destination.id);
+    setError(null);
+    try {
+      const body = await apiRequest<{ post: Post }>(
+        `/api/posts/${detail!.post.id}/destinations/${destination.id}/resolve`,
+        { body: JSON.stringify(parsed.data), method: "POST" }
+      );
+      setDetail(current =>
+        current === null ? null : { ...current, post: body.post }
+      );
+      await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const abandonDestination = async (destination: Destination) => {
+    if (
+      !window.confirm(
+        `Stop all future retries for ${platformLabels[destination.platform]}? This does not delete a provider post. Only choose this after the outcome is known.`
+      )
+    ) {
+      return;
+    }
+    setActionId(destination.id);
+    setError(null);
+    try {
+      const body = await apiRequest<{ post: Post }>(
+        `/api/posts/${detail!.post.id}/destinations/${destination.id}/abandon`,
+        {
+          body: JSON.stringify({ acknowledgement: "abandon_destination" }),
+          method: "POST"
+        }
+      );
+      setDetail(current =>
+        current === null ? null : { ...current, post: body.post }
+      );
+      await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setActionId(null);
+    }
+  };
+
   const reconnect = (destination: Destination) => {
     const returnTo = `/app/posts/detail?id=${encodeURIComponent(detail!.post.id)}`;
     window.location.assign(
@@ -186,6 +402,31 @@ function PostDetailContent() {
         `/api/oauth/${destination.platform}/start?returnTo=${encodeURIComponent(returnTo)}`
       )
     );
+  };
+
+  const removeSource = async () => {
+    if (
+      !window.confirm(
+        "Permanently remove this source video from VidRelay storage? Published provider posts and delivery history remain, but preview and future retries become unavailable."
+      )
+    ) {
+      return;
+    }
+    setRemovingSource(true);
+    setError(null);
+    try {
+      await apiRequest<unknown>(
+        `/api/uploads/${encodeURIComponent(detail!.post.upload.id)}`,
+        { method: "DELETE" }
+      );
+      setLease(null);
+      leaseUploadRef.current = null;
+      await load();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setRemovingSource(false);
+    }
   };
 
   if (loading) {
@@ -207,6 +448,8 @@ function PostDetailContent() {
 
   const { post, attempts } = detail;
   const postStatus = postStatusView(post.status);
+  const sourceRemovable =
+    post.upload.status === "ready" && post.sourceRemovalEligible;
   return (
     <div className="stack" aria-live={active ? "polite" : undefined}>
       <PageHeader
@@ -266,7 +509,19 @@ function PostDetailContent() {
               <p>{post.upload.filename}</p>
             </div>
           </div>
-          {lease === null ? (
+          {post.upload.status === "aborted" ? (
+            post.upload.storageDeletedAt === null ? (
+              <Notice tone="warning">
+                Source removal is pending. VidRelay will retry storage cleanup;
+                quota is released only after deletion is confirmed.
+              </Notice>
+            ) : (
+              <Notice tone="success">
+                The source video was removed from VidRelay storage. Provider
+                posts, destination outcomes, and attempt history remain.
+              </Notice>
+            )
+          ) : lease === null ? (
             <Notice tone="info">
               Preview could not be loaded. Publishing status is unaffected.
             </Notice>
@@ -304,6 +559,22 @@ function PostDetailContent() {
               <strong>{post.upload.audioCodec ?? "Unknown"}</strong>
             </div>
           </div>
+          {sourceRemovable ? (
+            <div className="stack stack-tight">
+              <Notice tone="warning">
+                All destinations are published or cancelled. You can release
+                storage without deleting provider posts or delivery history.
+              </Notice>
+              <Button
+                busy={removingSource}
+                onClick={() => void removeSource()}
+                size="small"
+                type="button"
+                variant="danger">
+                <Trash2 aria-hidden="true" size={14} /> Remove source video
+              </Button>
+            </div>
+          ) : null}
         </section>
 
         <section className="panel stack" aria-labelledby="delivery-heading">
@@ -382,7 +653,8 @@ function PostDetailContent() {
                         <ExternalLink aria-hidden="true" size={14} />
                       </Button>
                     ) : null}
-                    {destination.status === "reconciliation_required" ? (
+                    {destination.status === "reconciliation_required" &&
+                    destination.reconciliationMode === "automatic" ? (
                       <Button
                         busy={actionId === destination.id}
                         onClick={() =>
@@ -394,7 +666,25 @@ function PostDetailContent() {
                         outcome
                       </Button>
                     ) : null}
+                    {abandonable(destination) ? (
+                      <Button
+                        busy={actionId === destination.id}
+                        onClick={() => void abandonDestination(destination)}
+                        size="small"
+                        variant="danger">
+                        <XCircle aria-hidden="true" size={14} /> Abandon future
+                        retries
+                      </Button>
+                    ) : null}
                   </div>
+                  {destination.status === "reconciliation_required" &&
+                  destination.reconciliationMode === "manual" ? (
+                    <ManualResolutionControls
+                      busy={actionId === destination.id}
+                      destination={destination}
+                      onResolve={input => resolveManually(destination, input)}
+                    />
+                  ) : null}
                   <details>
                     <summary>
                       Attempt history ({destinationAttempts.length})

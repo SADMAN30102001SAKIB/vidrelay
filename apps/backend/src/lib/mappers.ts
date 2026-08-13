@@ -30,6 +30,7 @@ export const toUpload = (row: typeof uploads.$inferSelect): Upload => ({
   id: row.id,
   mimeType: row.mimeType,
   size: row.actualSize ?? row.expectedSize,
+  storageDeletedAt: row.storageDeletedAt,
   status: row.status,
   validation: validationFrom(row.validationJson),
   videoCodec: row.videoCodec,
@@ -49,6 +50,24 @@ export const toDestination = (
   platform: row.platform,
   providerPostId: row.remotePostId,
   providerUrl: row.remoteUrl,
+  reconciliationMode:
+    row.status !== "reconciliation_required"
+      ? null
+      : row.platform === "instagram"
+        ? row.remotePostId === null
+          ? "manual"
+          : "automatic"
+        : row.platform === "facebook"
+          ? row.remoteSessionId === null
+            ? "manual"
+            : "automatic"
+          : row.platform === "youtube"
+            ? row.remotePostId === null && row.remoteUploadUrlEncrypted === null
+              ? "manual"
+              : "automatic"
+            : row.remoteSessionId === null && row.remotePostId === null
+              ? "manual"
+              : "automatic",
   stage: row.stage,
   status: row.status,
   updatedAt: row.updatedAt

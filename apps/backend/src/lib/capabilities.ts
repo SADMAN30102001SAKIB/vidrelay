@@ -24,7 +24,10 @@ const configuredFor = (bindings: Bindings, platform: Platform): boolean => {
   return Boolean(bindings.TIKTOK_CLIENT_KEY && bindings.TIKTOK_CLIENT_SECRET);
 };
 
-const configuredMode = (bindings: Bindings, platform: Platform): CapabilityMode => {
+const configuredMode = (
+  bindings: Bindings,
+  platform: Platform
+): CapabilityMode => {
   const raw =
     platform === "facebook"
       ? bindings.FACEBOOK_CAPABILITY
@@ -57,7 +60,7 @@ const capabilityMessage = (
       : "TikTok limits unaudited Direct Post clients to private visibility.";
   }
   if (mode === "inbox_only") {
-    return "Media is sent to the TikTok inbox and the creator must finish publishing in TikTok.";
+    return "TikTok inbox delivery is not implemented, so publishing is unavailable in this mode.";
   }
   if (mode === "disabled") {
     return "This provider is disabled.";
@@ -66,7 +69,10 @@ const capabilityMessage = (
   return "Direct publishing is available.";
 };
 
-export const getCapability = (bindings: Bindings, platform: Platform): Capability => {
+export const getCapability = (
+  bindings: Bindings,
+  platform: Platform
+): Capability => {
   const configured = configuredFor(bindings, platform);
   const configuredValue = configuredMode(bindings, platform);
   const mode = configured ? configuredValue : "disabled";

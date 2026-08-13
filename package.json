@@ -13,6 +13,7 @@
     "types:generate": "pnpm --filter @vidrelay/backend types:generate",
     "generate": "pnpm --filter @vidrelay/backend db:generate",
     "migrate:local": "pnpm --filter @vidrelay/backend db:migrate:local",
+    "migrations:list:remote": "pnpm --filter @vidrelay/backend db:migrations:list:remote",
     "migrate:remote": "pnpm --filter @vidrelay/backend db:migrate:remote",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",

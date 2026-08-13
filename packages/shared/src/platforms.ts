@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const platforms = ["facebook", "instagram", "youtube", "tiktok"] as const;
+export const platforms = [
+  "facebook",
+  "instagram",
+  "youtube",
+  "tiktok"
+] as const;
 export const platformSchema = z.enum(platforms);
 export type Platform = z.infer<typeof platformSchema>;
 
@@ -70,9 +75,13 @@ export type UploadStatus = z.infer<typeof uploadStatusSchema>;
 export const commonMediaProfile = {
   acceptedMimeTypes: ["video/mp4"],
   audioCodec: "aac",
+  audioSampleRateHz: 48_000,
   durationSeconds: { min: 4, max: 60 },
   fps: { min: 23, max: 60 },
   maxBytes: 1_073_741_824,
+  maxAudioBitrateBps: 128_000,
+  maxVideoBitrateBps: 25_000_000,
+  maxWidth: 1920,
   minHeight: 960,
   minWidth: 540,
   name: "Vertical MP4",
@@ -85,9 +94,13 @@ export const commonMediaProfile = {
 export const commonMediaProfileSchema = z.object({
   acceptedMimeTypes: z.array(z.literal("video/mp4")),
   audioCodec: z.literal("aac"),
+  audioSampleRateHz: z.literal(48_000),
   durationSeconds: z.object({ min: z.literal(4), max: z.literal(60) }),
   fps: z.object({ min: z.literal(23), max: z.literal(60) }),
   maxBytes: z.literal(1_073_741_824),
+  maxAudioBitrateBps: z.literal(128_000),
+  maxVideoBitrateBps: z.literal(25_000_000),
+  maxWidth: z.literal(1920),
   minHeight: z.literal(960),
   minWidth: z.literal(540),
   name: z.literal("Vertical MP4"),

@@ -23,7 +23,10 @@ describe("credential cryptography", () => {
         encrypted,
         encryptionKey
       )
-    ).resolves.toEqual({ accessToken: "test-token", refreshToken: "test-refresh" });
+    ).resolves.toEqual({
+      accessToken: "test-token",
+      refreshToken: "test-refresh"
+    });
   });
 
   it("rejects a modified ciphertext", async () => {
@@ -49,6 +52,8 @@ describe("credential cryptography", () => {
     await expect(
       verifyPassword("a correct horse battery staple", encoded)
     ).resolves.toBe(true);
-    await expect(verifyPassword("the wrong password", encoded)).resolves.toBe(false);
+    await expect(verifyPassword("the wrong password", encoded)).resolves.toBe(
+      false
+    );
   });
 });

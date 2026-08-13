@@ -20,7 +20,7 @@ export const readLimitedText = async (
   const decoder = new TextDecoder();
   let bytesRead = 0;
   let text = "";
-  while (true) {
+  for (;;) {
     const result = await reader.read();
     if (result.done) {
       text += decoder.decode();

@@ -28,7 +28,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "vidrelay"
+      "database_name": "vidrelay",
+      "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [
@@ -46,42 +47,5 @@
   ],
   "triggers": {
     "crons": ["*/5 * * * *"]
-  },
-  "env": {
-    "production": {
-      "vars": {
-        "APP_ENV": "production",
-        "APP_ORIGINS": "https://app.example.com",
-        "PUBLIC_APP_ORIGIN": "https://app.example.com",
-        "PUBLIC_API_ORIGIN": "https://api.example.com",
-        "ALLOW_SIGNUPS": "true",
-        "UPLOAD_MODE": "direct",
-        "R2_BUCKET_NAME": "vidrelay-media-production",
-        "META_GRAPH_VERSION": "v25.0",
-        "FACEBOOK_CAPABILITY": "review_pending",
-        "INSTAGRAM_CAPABILITY": "review_pending",
-        "YOUTUBE_CAPABILITY": "private_only",
-        "TIKTOK_CAPABILITY": "private_only"
-      },
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "vidrelay-production"
-        }
-      ],
-      "r2_buckets": [
-        {
-          "binding": "MEDIA",
-          "bucket_name": "vidrelay-media-production"
-        }
-      ],
-      "workflows": [
-        {
-          "name": "vidrelay-publish-production",
-          "binding": "PUBLISH_WORKFLOW",
-          "class_name": "PublishWorkflow"
-        }
-      ]
-    }
   }
 }

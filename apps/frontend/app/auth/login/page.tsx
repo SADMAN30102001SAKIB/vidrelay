@@ -20,7 +20,7 @@ const safeReturnTo = (value: string | null): string =>
     : "/app";
 
 function LoginForm() {
-  const { login } = useSession();
+  const { config, login } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -80,13 +80,15 @@ function LoginForm() {
           Log in
         </Button>
       </form>
-      <p className="form-help">
-        New to VidRelay?{" "}
-        <Link className="text-link" href="/auth/signup">
-          Create an account
-        </Link>
-        .
-      </p>
+      {config?.signupsEnabled === true ? (
+        <p className="form-help">
+          New to VidRelay?{" "}
+          <Link className="text-link" href="/auth/signup">
+            Create an account
+          </Link>
+          .
+        </p>
+      ) : null}
     </>
   );
 }

@@ -3,6 +3,10 @@ TOKEN_ENCRYPTION_KEY=
 MEDIA_LEASE_SECRET=
 AUDIT_HASH_SECRET=
 
+# Optional one-time first-owner bootstrap token when ALLOW_SIGNUPS=false.
+# Use at least 32 random characters, create the first account, then remove it.
+BOOTSTRAP_SIGNUP_TOKEN=
+
 # Required only when UPLOAD_MODE=direct.
 R2_ACCOUNT_ID=
 R2_ACCESS_KEY_ID=

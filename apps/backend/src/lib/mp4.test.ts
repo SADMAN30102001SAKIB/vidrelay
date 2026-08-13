@@ -30,7 +30,11 @@ const bucketFor = (bytes: Uint8Array): R2Bucket =>
 describe("MP4 inspection", () => {
   it("rejects a file with no movie metadata box", async () => {
     const bytes = box("ftyp");
-    const result = await inspectMp4(bucketFor(bytes), "test.mp4", bytes.byteLength);
+    const result = await inspectMp4(
+      bucketFor(bytes),
+      "test.mp4",
+      bytes.byteLength
+    );
 
     expect(result.errors).toContain(
       "The file is not a readable ISO Base Media (MP4) container."
@@ -44,7 +48,11 @@ describe("MP4 inspection", () => {
     bytes.set(ftyp);
     bytes.set(moov, ftyp.byteLength);
 
-    const result = await inspectMp4(bucketFor(bytes), "test.mp4", bytes.byteLength);
+    const result = await inspectMp4(
+      bucketFor(bytes),
+      "test.mp4",
+      bytes.byteLength
+    );
 
     expect(result.errors).toContain("Video must use the H.264 codec.");
     expect(result.errors).toContain("Audio must use the AAC codec.");

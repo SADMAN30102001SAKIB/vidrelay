@@ -18,7 +18,7 @@ export const resolveApiUrl = (
   return "http://localhost:4000";
 };
 
-export const API_URL = resolveApiUrl(
+const API_URL = resolveApiUrl(
   process.env.NEXT_PUBLIC_API_URL,
   process.env.NODE_ENV
 );

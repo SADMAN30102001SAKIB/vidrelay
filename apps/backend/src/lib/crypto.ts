@@ -13,7 +13,10 @@ const bytesToBase64Url = (bytes: Uint8Array): string => {
     binary += String.fromCharCode(byte);
   }
 
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
 };
 
 const base64UrlToBytes = (value: string): Uint8Array => {
@@ -29,10 +32,13 @@ const importAesKey = async (encodedKey: string): Promise<CryptoKey> => {
     throw new Error("TOKEN_ENCRYPTION_KEY must be a 32-byte base64url value.");
   }
 
-  return await crypto.subtle.importKey("raw", toArrayBuffer(raw), "AES-GCM", false, [
-    "encrypt",
-    "decrypt"
-  ]);
+  return await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(raw),
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"]
+  );
 };
 
 export const randomToken = (byteLength = 32): string => {
@@ -43,16 +49,24 @@ export const randomToken = (byteLength = 32): string => {
 
 const sha256 = async (value: string | Uint8Array): Promise<Uint8Array> => {
   const input = typeof value === "string" ? encoder.encode(value) : value;
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", toArrayBuffer(input)));
+  return new Uint8Array(
+    await crypto.subtle.digest("SHA-256", toArrayBuffer(input))
+  );
 };
 
-export const sha256Base64Url = async (value: string | Uint8Array): Promise<string> =>
-  bytesToBase64Url(await sha256(value));
+export const sha256Base64Url = async (
+  value: string | Uint8Array
+): Promise<string> => bytesToBase64Url(await sha256(value));
 
 export const sha256Hex = async (value: string | Uint8Array): Promise<string> =>
-  Array.from(await sha256(value), byte => byte.toString(16).padStart(2, "0")).join("");
+  Array.from(await sha256(value), byte =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
 
-export const hmacBase64Url = async (secret: string, value: string): Promise<string> => {
+export const hmacBase64Url = async (
+  secret: string,
+  value: string
+): Promise<string> => {
   const key = await crypto.subtle.importKey(
     "raw",
     toArrayBuffer(encoder.encode(secret)),
@@ -60,11 +74,18 @@ export const hmacBase64Url = async (secret: string, value: string): Promise<stri
     false,
     ["sign"]
   );
-  const signature = await crypto.subtle.sign("HMAC", key, toArrayBuffer(encoder.encode(value)));
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    toArrayBuffer(encoder.encode(value))
+  );
   return bytesToBase64Url(new Uint8Array(signature));
 };
 
-export const hmacSha256Hex = async (secret: string, value: string): Promise<string> => {
+export const hmacSha256Hex = async (
+  secret: string,
+  value: string
+): Promise<string> => {
   const key = await crypto.subtle.importKey(
     "raw",
     toArrayBuffer(encoder.encode(secret)),
@@ -115,7 +136,10 @@ export const encryptJson = async (
   ].join(".");
 };
 
-export const decryptJson = async <T>(value: string, encodedKey: string): Promise<T> => {
+export const decryptJson = async <T>(
+  value: string,
+  encodedKey: string
+): Promise<T> => {
   const [version, encodedIv, encodedCiphertext, extra] = value.split(".");
   if (
     version === undefined ||
@@ -167,8 +191,12 @@ export const hashPassword = async (password: string): Promise<string> => {
   ].join("$");
 };
 
-export const verifyPassword = async (password: string, encodedHash: string): Promise<boolean> => {
-  const [algorithm, iterationText, encodedSalt, expected, extra] = encodedHash.split("$");
+export const verifyPassword = async (
+  password: string,
+  encodedHash: string
+): Promise<boolean> => {
+  const [algorithm, iterationText, encodedSalt, expected, extra] =
+    encodedHash.split("$");
   const iterations = Number(iterationText);
   if (
     algorithm !== "pbkdf2_sha256" ||

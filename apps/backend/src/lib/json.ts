@@ -7,7 +7,10 @@ import { readLimitedText } from "./request-body";
 
 const maximumJsonBytes = 256 * 1024;
 
-export const parseJson = async <T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> => {
+export const parseJson = async <T>(
+  context: Context<AppEnv>,
+  schema: ZodType<T>
+): Promise<T> => {
   let input: unknown;
   const raw = await readLimitedText(context.req.raw, maximumJsonBytes, {
     code: "json_too_large",
@@ -16,7 +19,11 @@ export const parseJson = async <T>(context: Context<AppEnv>, schema: ZodType<T>)
   try {
     input = JSON.parse(raw);
   } catch {
-    throw new AppError(400, "invalid_json", "The request body must be valid JSON.");
+    throw new AppError(
+      400,
+      "invalid_json",
+      "The request body must be valid JSON."
+    );
   }
 
   const result = schema.safeParse(input);

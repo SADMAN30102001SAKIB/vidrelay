@@ -66,7 +66,9 @@ export const memberships = sqliteTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["owner", "member"] }).notNull().default("owner"),
+    role: text("role", { enum: ["owner", "member"] })
+      .notNull()
+      .default("owner"),
     createdAt: integer("created_at")
       .notNull()
       .default(sql.raw("(unixepoch() * 1000)"))
@@ -203,11 +205,20 @@ export const uploads = sqliteTable(
     mimeType: text("mime_type").notNull(),
     expectedSize: integer("expected_size").notNull(),
     actualSize: integer("actual_size"),
-    uploadMode: text("upload_mode", { enum: ["direct", "worker_proxy"] }).notNull(),
+    uploadMode: text("upload_mode", {
+      enum: ["direct", "worker_proxy"]
+    }).notNull(),
     multipartUploadId: text("multipart_upload_id"),
     partSize: integer("part_size").notNull(),
     status: text("status", {
-      enum: ["created", "uploading", "verifying", "ready", "rejected", "aborted"]
+      enum: [
+        "created",
+        "uploading",
+        "verifying",
+        "ready",
+        "rejected",
+        "aborted"
+      ]
     })
       .notNull()
       .default("created"),
@@ -217,7 +228,9 @@ export const uploads = sqliteTable(
     fpsMilli: integer("fps_milli"),
     videoCodec: text("video_codec"),
     audioCodec: text("audio_codec"),
-    validationJson: text("validation_json").notNull().default('{"errors":[],"warnings":[]}'),
+    validationJson: text("validation_json")
+      .notNull()
+      .default('{"errors":[],"warnings":[]}'),
     completedAt: integer("completed_at"),
     storageDeletedAt: integer("storage_deleted_at"),
     ...timestamps
@@ -242,7 +255,7 @@ export const posts = sqliteTable(
     uploadId: text("upload_id")
       .notNull()
       .references(() => uploads.id, { onDelete: "restrict" }),
-    idempotencyKey: text("idempotency_key").notNull(),
+    idempotencyKey: text("idempotency_key").notNull().default(""),
     sharedCaption: text("shared_caption").notNull().default(""),
     status: text("status", {
       enum: [
@@ -325,7 +338,10 @@ export const publishDestinations = sqliteTable(
     ...timestamps
   },
   table => [
-    uniqueIndex("destinations_post_connection_unique").on(table.postId, table.connectionId),
+    uniqueIndex("destinations_post_connection_unique").on(
+      table.postId,
+      table.connectionId
+    ),
     index("destinations_post_idx").on(table.postId),
     index("destinations_status_poll_idx").on(table.status, table.nextPollAt)
   ]
@@ -393,9 +409,12 @@ export const mediaLeases = sqliteTable(
     uploadId: text("upload_id")
       .notNull()
       .references(() => uploads.id, { onDelete: "cascade" }),
-    destinationId: text("destination_id").references(() => publishDestinations.id, {
-      onDelete: "cascade"
-    }),
+    destinationId: text("destination_id").references(
+      () => publishDestinations.id,
+      {
+        onDelete: "cascade"
+      }
+    ),
     purpose: text("purpose", {
       enum: ["facebook", "instagram", "tiktok", "preview"]
     }).notNull(),
@@ -415,10 +434,14 @@ export const webhookEvents = sqliteTable(
   "webhook_events",
   {
     id: text("id").primaryKey(),
-    provider: text("provider", { enum: ["facebook", "instagram", "tiktok"] }).notNull(),
+    provider: text("provider", {
+      enum: ["facebook", "instagram", "tiktok"]
+    }).notNull(),
     providerEventId: text("provider_event_id"),
     payloadHash: text("payload_hash").notNull(),
-    status: text("status", { enum: ["received", "processed", "ignored", "failed"] })
+    status: text("status", {
+      enum: ["received", "processed", "ignored", "failed"]
+    })
       .notNull()
       .default("received"),
     processedAt: integer("processed_at"),
@@ -428,7 +451,10 @@ export const webhookEvents = sqliteTable(
       .default(sql.raw("(unixepoch() * 1000)"))
   },
   table => [
-    uniqueIndex("webhook_provider_payload_unique").on(table.provider, table.payloadHash),
+    uniqueIndex("webhook_provider_payload_unique").on(
+      table.provider,
+      table.payloadHash
+    ),
     index("webhook_status_idx").on(table.status, table.createdAt)
   ]
 );
@@ -461,14 +487,47 @@ export const deletionRequests = sqliteTable(
   "deletion_requests",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
     workspaceId: text("workspace_id").references(() => workspaces.id, {
       onDelete: "set null"
     }),
-    status: text("status", { enum: ["requested", "processing", "complete", "failed"] })
+    status: text("status", {
+      enum: [
+        "requested",
+        "processing",
+        "retry_scheduled",
+        "manual_review",
+        "complete"
+      ]
+    })
       .notNull()
       .default("requested"),
     confirmationReferenceHash: text("confirmation_reference_hash").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at"),
+    phase: text("phase", {
+      enum: [
+        "queued",
+        "provider_cleanup",
+        "media_cleanup",
+        "account_cleanup",
+        "complete"
+      ]
+    })
+      .notNull()
+      .default("queued"),
+    failureCode: text("failure_code", {
+      enum: [
+        "deletion_interrupted",
+        "provider_cleanup_failed",
+        "media_cleanup_failed",
+        "account_cleanup_failed",
+        "deletion_processing_failed",
+        "deletion_subject_missing"
+      ]
+    }),
     lastError: text("last_error"),
     requestedAt: integer("requested_at").notNull(),
     completedAt: integer("completed_at"),
@@ -478,6 +537,14 @@ export const deletionRequests = sqliteTable(
   },
   table => [
     index("deletion_status_idx").on(table.status, table.requestedAt),
-    uniqueIndex("deletion_workspace_active_unique").on(table.workspaceId, table.status)
+    index("deletion_retry_idx").on(
+      table.status,
+      table.nextAttemptAt,
+      table.requestedAt
+    ),
+    uniqueIndex("deletion_workspace_active_unique").on(
+      table.workspaceId,
+      table.status
+    )
   ]
 );

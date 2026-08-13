@@ -1,5 +1,5 @@
 import type { DestinationStatus, PostStatus } from "@vidrelay/shared";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
 import type { Bindings } from "../env";
 import { createDb } from "../db/client";
@@ -11,7 +11,10 @@ import {
   uploads
 } from "../db/schema";
 
-export const loadPublishContext = async (bindings: Bindings, destinationId: string) => {
+export const loadPublishContext = async (
+  bindings: Bindings,
+  destinationId: string
+) => {
   const [row] = await createDb(bindings.DB)
     .select({
       connection: socialConnections,
@@ -31,7 +34,9 @@ export const loadPublishContext = async (bindings: Bindings, destinationId: stri
   return row ?? null;
 };
 
-export type PublishContext = NonNullable<Awaited<ReturnType<typeof loadPublishContext>>>;
+export type PublishContext = NonNullable<
+  Awaited<ReturnType<typeof loadPublishContext>>
+>;
 
 const mutableDestinationStatuses: DestinationStatus[] = [
   "queued",
@@ -118,6 +123,8 @@ export const finishDestination = async (
     errorMessage?: string | null | undefined;
     providerPostId?: string | undefined;
     providerUrl?: string | undefined;
+    authoritative?: boolean | undefined;
+    expectedUpdatedAt?: number | undefined;
     stage: string;
     status: DestinationStatus;
   }
@@ -146,7 +153,12 @@ export const finishDestination = async (
   const allowedCurrentStatus =
     input.status === "published"
       ? ne(publishDestinations.status, "cancelled")
-      : inArray(publishDestinations.status, mutableDestinationStatuses);
+      : input.authoritative === true
+        ? and(
+            ne(publishDestinations.status, "cancelled"),
+            ne(publishDestinations.status, "published")
+          )
+        : inArray(publishDestinations.status, mutableDestinationStatuses);
   const [updated] = await db.batch([
     db
       .update(publishDestinations)
@@ -155,7 +167,10 @@ export const finishDestination = async (
         and(
           eq(publishDestinations.id, input.destinationId),
           eq(publishDestinations.attemptNumber, input.attemptNumber),
-          allowedCurrentStatus
+          allowedCurrentStatus,
+          input.expectedUpdatedAt === undefined
+            ? undefined
+            : eq(publishDestinations.updatedAt, input.expectedUpdatedAt)
         )
       )
       .returning({ postId: publishDestinations.postId }),
@@ -204,35 +219,75 @@ export const finishDestination = async (
   return destination !== undefined;
 };
 
-const activeStatuses = new Set<DestinationStatus>(mutableDestinationStatuses);
-
 export const recomputePostStatus = async (
   bindings: Bindings,
   postId: string
 ): Promise<PostStatus> => {
   const db = createDb(bindings.DB);
-  const rows = await db
-    .select({ status: publishDestinations.status })
-    .from(publishDestinations)
-    .where(eq(publishDestinations.postId, postId));
-  const statuses = rows.map(row => row.status);
-
-  let status: PostStatus;
-  if (statuses.length > 0 && statuses.every(value => value === "published")) {
-    status = "published";
-  } else if (statuses.some(value => activeStatuses.has(value))) {
-    status = "publishing";
-  } else if (statuses.some(value => value === "published")) {
-    status = "partial_success";
-  } else if (statuses.length > 0 && statuses.every(value => value === "cancelled")) {
-    status = "cancelled";
-  } else {
-    status = "failed";
-  }
-
-  await db
+  const [updated] = await db
     .update(posts)
-    .set({ status, updatedAt: Date.now() })
-    .where(eq(posts.id, postId));
-  return status;
+    .set({
+      status: sql<PostStatus>`CASE
+        WHEN EXISTS (SELECT 1 FROM ${publishDestinations} WHERE ${publishDestinations.postId} = ${posts.id})
+          AND NOT EXISTS (SELECT 1 FROM ${publishDestinations} WHERE ${publishDestinations.postId} = ${posts.id} AND ${publishDestinations.status} <> 'published')
+          THEN 'published'
+        WHEN EXISTS (SELECT 1 FROM ${publishDestinations} WHERE ${publishDestinations.postId} = ${posts.id} AND ${publishDestinations.status} IN ('queued', 'starting', 'transferring', 'processing', 'publishing', 'retry_scheduled'))
+          THEN 'publishing'
+        WHEN EXISTS (SELECT 1 FROM ${publishDestinations} WHERE ${publishDestinations.postId} = ${posts.id} AND ${publishDestinations.status} = 'published')
+          THEN 'partial_success'
+        WHEN EXISTS (SELECT 1 FROM ${publishDestinations} WHERE ${publishDestinations.postId} = ${posts.id})
+          AND NOT EXISTS (SELECT 1 FROM ${publishDestinations} WHERE ${publishDestinations.postId} = ${posts.id} AND ${publishDestinations.status} <> 'cancelled')
+          THEN 'cancelled'
+        ELSE 'failed'
+      END`,
+      updatedAt: Date.now()
+    })
+    .where(eq(posts.id, postId))
+    .returning({ status: posts.status });
+  return updated?.status ?? "failed";
+};
+
+export const recoverStaleDestinations = async (
+  bindings: Bindings
+): Promise<number> => {
+  const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+  const rows = await createDb(bindings.DB)
+    .select()
+    .from(publishDestinations)
+    .where(
+      and(
+        inArray(publishDestinations.status, mutableDestinationStatuses),
+        lt(publishDestinations.updatedAt, cutoff)
+      )
+    )
+    .limit(20);
+  let recovered = 0;
+  for (const row of rows) {
+    const hasRemoteState =
+      row.outcomeUnknown ||
+      row.stage === "provider_commit_started" ||
+      row.remoteSessionId !== null ||
+      row.remotePostId !== null ||
+      row.remoteUploadUrlEncrypted !== null;
+    const status: DestinationStatus = hasRemoteState
+      ? "reconciliation_required"
+      : "failed_permanent";
+    const changed = await finishDestination(bindings, {
+      attemptNumber: row.attemptNumber,
+      destinationId: row.id,
+      errorCode: "workflow_stale",
+      errorMessage: hasRemoteState
+        ? "Publishing stopped without a terminal result. Reconcile the provider outcome."
+        : "Publishing stopped before a provider upload was created. Retry is available.",
+      stage: hasRemoteState
+        ? "reconciliation_required"
+        : "stale_workflow_failed",
+      expectedUpdatedAt: row.updatedAt,
+      status
+    });
+    if (changed) {
+      recovered += 1;
+    }
+  }
+  return recovered;
 };

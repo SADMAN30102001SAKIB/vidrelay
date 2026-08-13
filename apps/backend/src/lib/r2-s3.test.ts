@@ -24,7 +24,9 @@ describe("R2 SigV4 presigning", () => {
     );
 
     expect(url.host).toBe("abc123.r2.cloudflarestorage.com");
-    expect(url.pathname).toBe("/vidrelay-media/workspaces/ws%201/uploads/video.mp4");
+    expect(url.pathname).toBe(
+      "/vidrelay-media/workspaces/ws%201/uploads/video.mp4"
+    );
     expect(url.searchParams.get("partNumber")).toBe("7");
     expect(url.searchParams.get("uploadId")).toBe("upload+/=");
     expect(url.searchParams.get("X-Amz-Expires")).toBe("300");

@@ -3,6 +3,7 @@ node_modules/
 .next/
 out/
 dist/
+.wrangler-production-dry-run/
 coverage/
 .wrangler/
 .fallow/
@@ -16,6 +17,7 @@ coverage/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+apps/backend/wrangler.production.jsonc
 apps/backend/r2-cors.production.json
 
 # Local databases and operating-system files

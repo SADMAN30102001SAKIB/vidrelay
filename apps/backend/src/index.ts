@@ -7,6 +7,7 @@ import { safeLog } from "./lib/safe-logger";
 import { corsAndCsrf, requestContext } from "./middleware/security";
 import { dispatchOutbox } from "./publishing/outbox";
 import { PublishWorkflow } from "./publishing/workflow";
+import { recoverStaleDestinations } from "./publishing/repository";
 import {
   accountRoutes,
   deletionStatusRoutes,
@@ -119,13 +120,18 @@ const runMaintenance = async (bindings: Bindings): Promise<void> => {
     { name: "outbox", run: () => dispatchOutbox(bindings) },
     { name: "deletions", run: () => processDeletionRequests(bindings) },
     { name: "upload_cleanup", run: () => cleanupUploads(bindings) },
+    {
+      name: "stale_publish_recovery",
+      run: () => recoverStaleDestinations(bindings)
+    },
     { name: "expiry_cleanup", run: () => cleanExpiredRecords(bindings) }
   ];
   const results = await Promise.allSettled(tasks.map(task => task.run()));
   for (const [index, result] of results.entries()) {
     if (result.status === "rejected") {
       safeLog("error", "maintenance.task_failed", {
-        error: result.reason instanceof Error ? result.reason.message : "unknown",
+        error:
+          result.reason instanceof Error ? result.reason.message : "unknown",
         task: tasks[index]?.name ?? "unknown"
       });
     }

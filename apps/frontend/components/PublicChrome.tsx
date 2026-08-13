@@ -9,7 +9,7 @@ import { useSession } from "@/providers/SessionProvider";
 import { Brand } from "./Brand";
 import { buttonClass } from "./ui";
 
-export function PublicHeader() {
+function PublicHeader() {
   const { config, status } = useSession();
   return (
     <header className="public-header">
@@ -27,13 +27,13 @@ export function PublicHeader() {
             <Link className="public-nav-link" href="/auth/login">
               Log in
             </Link>
-            {config?.signupsEnabled === false ? null : (
+            {config?.signupsEnabled === true ? (
               <Link
                 className={buttonClass("primary", { small: true })}
                 href="/auth/signup">
                 Start publishing
               </Link>
-            )}
+            ) : null}
           </>
         )}
       </nav>
@@ -41,7 +41,7 @@ export function PublicHeader() {
   );
 }
 
-export function PublicFooter() {
+function PublicFooter() {
   return (
     <footer className="public-footer">
       <Brand />

@@ -1,9 +1,10 @@
 # VidRelay
 
 VidRelay is a Cloudflare-based SaaS control plane for uploading one verified vertical
-video and publishing it independently to supported social destinations. The first
-release targets **Facebook Pages**, **Instagram Professional accounts**, and
-**YouTube channels**. TikTok is deliberately outside the v1 launch scope.
+video and publishing it independently to supported social destinations. The
+implementation covers **Facebook Pages**, **Instagram Professional accounts**,
+**YouTube channels**, and **TikTok creators**. Each provider remains unavailable
+or restricted until its credentials, review state, and capability mode permit it.
 
 This repository is pre-release software. Provider credentials, provider approval,
 successful verification, and an operator-approved release are all separate gates.
@@ -17,7 +18,7 @@ guarantee that every provider will accept or immediately publish a video.
 | Facebook    | A Page for which the connecting user has the required Page task | Development/test access until Meta grants the required production access; direct Page Reel publishing only when the capability is enabled |
 | Instagram   | A Professional account supported by Instagram Login             | Development/test access until Meta review is complete; no personal-account publishing                                                     |
 | YouTube     | A channel authorized with `youtube.upload`                      | Private uploads while the API project is restricted; broader visibility only after the required YouTube audit/approval                    |
-| TikTok      | Not in v1                                                       | Leave credentials unset and the production capability disabled                                                                            |
+| TikTok      | A creator returned as eligible by the Content Posting API       | Keep unavailable until Content Posting approval; unaudited testing is private-only and still subject to current creator capabilities      |
 
 The API exposes the effective deployment truth at `GET /api/config`. The frontend
 must render those capability modes rather than hard-code availability.
@@ -68,25 +69,35 @@ Local development uses Worker-proxied R2 uploads. Production uses direct,
 presigned multipart R2 uploads and therefore requires the additional R2
 credentials and bucket CORS described in the runbook.
 
+Production publishing requires a Workers Paid plan. The bounded polling and
+large resumable-upload workflows can exceed the Free plan's per-instance external
+subrequest allowance; this is a mandatory release gate, not an optimization.
+
 ## Root commands
 
-| Command                | Purpose                                                                   |
-| ---------------------- | ------------------------------------------------------------------------- |
-| `pnpm dev`             | Run frontend and backend development servers                              |
-| `pnpm types:generate`  | Regenerate Wrangler binding types after configuration changes             |
-| `pnpm generate`        | Generate a Drizzle migration from schema changes                          |
-| `pnpm migrate:local`   | Apply D1 migrations to local Wrangler state                               |
-| `pnpm migrate:remote`  | Apply D1 migrations to the production D1 database; this is a remote write |
-| `pnpm check`           | Format check, lint, typecheck, tests, Fallow, and builds                  |
-| `pnpm deploy:backend`  | Deploy the production API Worker and Workflow                             |
-| `pnpm deploy:frontend` | Build and upload the static frontend to the `vidrelay` Pages project      |
+| Command                       | Purpose                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `pnpm dev`                    | Run frontend and backend development servers                              |
+| `pnpm types:generate`         | Regenerate Wrangler binding types after configuration changes             |
+| `pnpm generate`               | Generate a Drizzle migration from schema changes                          |
+| `pnpm migrate:local`          | Apply D1 migrations to local Wrangler state                               |
+| `pnpm migrations:list:remote` | List pending migrations for the production config without applying them   |
+| `pnpm migrate:remote`         | Apply D1 migrations to the production D1 database; this is a remote write |
+| `pnpm check`                  | Format check, lint, typecheck, tests, Fallow, and builds; requires `NEXT_PUBLIC_API_URL` |
+| `pnpm deploy:backend`         | Deploy the production API Worker and Workflow                             |
+| `pnpm deploy:frontend`        | Build and upload the static frontend to the `vidrelay` Pages project      |
 
-Do not run either deployment or the remote migration from an unreviewed branch.
-Follow [the release runbook](docs/OPERATIONS.md#production-release) first.
+`apps/backend/wrangler.jsonc` is local-only. Both production commands require an
+ignored `apps/backend/wrangler.production.jsonc` copied from the checked-in
+example and filled with the customer's exact origins and D1 database ID. Do not
+run either deployment or the remote migration from an unreviewed branch. Follow
+[the release runbook](docs/OPERATIONS.md#production-release) first.
 
 ## Media contract
 
 VidRelay currently validates rather than transcodes. A file must be an MP4 with
-H.264 video and AAC audio, vertical 9:16, at least 540x960, 4-60 seconds,
-23-60 FPS when detectable, and no larger than 1 GiB. The recommended input is
-1080x1920. Provider-side checks still apply after VidRelay validation.
+H.264 video and AAC audio at 48 kHz, vertical 9:16, at least 540x960 with no more
+than 1920 horizontal pixels, 4-60 seconds, 23-60 FPS, video bitrate no higher
+than 25 Mbps, audio bitrate no higher than 128 kbps, and no larger than 1 GiB.
+The recommended input is 1080x1920. This is bounded MP4 preflight, not a complete
+decoder, and provider-side checks still apply after VidRelay validation.

@@ -51,13 +51,14 @@ export const dispatchOutbox = async (bindings: Bindings): Promise<number> => {
     return events.length;
   } catch (error) {
     const message =
-      error instanceof Error ? error.message.slice(0, 500) : "Workflow dispatch failed.";
+      error instanceof Error
+        ? error.message.slice(0, 500)
+        : "Workflow dispatch failed.";
     await bindings.DB.batch(
       events.map(event =>
-        bindings.DB.prepare("UPDATE outbox_events SET last_error = ? WHERE id = ?").bind(
-          message,
-          event.id
-        )
+        bindings.DB.prepare(
+          "UPDATE outbox_events SET last_error = ? WHERE id = ?"
+        ).bind(message, event.id)
       )
     );
     safeLog("error", "outbox.dispatch_failed", {

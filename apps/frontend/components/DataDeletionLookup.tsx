@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import type { DeletionView } from "@vidrelay/shared";
 import type { FormEvent } from "react";
 
 import { apiRequest, errorMessage } from "@/lib/api";
@@ -9,12 +10,30 @@ import { formatDate } from "@/lib/format";
 
 import { Button, Notice } from "./ui";
 
-interface DeletionView {
-  completedAt: number | null;
-  id: string;
-  requestedAt: number;
-  status: "complete" | "failed" | "processing" | "requested";
-}
+const statusLabel = (status: DeletionView["status"]): string =>
+  status.replaceAll("_", " ");
+
+const phaseLabel = (phase: DeletionView["phase"]): string =>
+  phase.replaceAll("_", " ");
+
+const statusMessage = (deletion: DeletionView): string => {
+  if (deletion.status === "complete") {
+    return "VidRelay account and workspace deletion is complete.";
+  }
+  if (deletion.status === "manual_review") {
+    return "Automatic deletion could not finish. Contact the service operator and provide this private reference and the support code shown with this status.";
+  }
+  if (
+    deletion.status === "retry_scheduled" &&
+    deletion.nextAttemptAt !== null
+  ) {
+    return `A temporary problem delayed deletion. Another automatic attempt is scheduled for ${formatDate(deletion.nextAttemptAt)}.`;
+  }
+  if (deletion.status === "processing") {
+    return "VidRelay is deleting provider authorization, stored media, and local account data.";
+  }
+  return "The request is queued for automatic processing.";
+};
 
 export function DataDeletionLookup() {
   const [reference, setReference] = useState("");
@@ -63,12 +82,20 @@ export function DataDeletionLookup() {
         </Button>
         <Button
           onClick={() => {
-            const saved = localStorage.getItem("vidrelay.deletion-reference");
-            if (saved === null) {
-              setError("No deletion reference is saved in this browser.");
-            } else {
-              setReference(saved);
-              setError(null);
+            try {
+              const saved = localStorage.getItem(
+                "vidrelay.deletion-reference"
+              );
+              if (saved === null) {
+                setError("No deletion reference is saved in this browser.");
+              } else {
+                setReference(saved);
+                setError(null);
+              }
+            } catch {
+              setError(
+                "Browser storage is unavailable. Enter your private reference manually."
+              );
             }
           }}
           type="button"
@@ -78,12 +105,32 @@ export function DataDeletionLookup() {
       </form>
       {error === null ? null : <Notice tone="danger">{error}</Notice>}
       {deletion === null ? null : (
-        <Notice tone={deletion.status === "complete" ? "success" : "info"}>
-          Status: {deletion.status}. Requested{" "}
-          {formatDate(deletion.requestedAt)}
+        <Notice
+          tone={
+            deletion.status === "complete"
+              ? "success"
+              : deletion.status === "manual_review"
+                ? "danger"
+                : deletion.status === "retry_scheduled"
+                  ? "warning"
+                  : "info"
+          }>
+          <strong>Status: {statusLabel(deletion.status)}.</strong>{" "}
+          {statusMessage(deletion)} Requested {formatDate(deletion.requestedAt)}
           {deletion.completedAt === null
             ? "."
-            : ` and completed ${formatDate(deletion.completedAt)}.`}
+            : `; completed ${formatDate(deletion.completedAt)}.`}
+          {deletion.status === "processing" ||
+          deletion.status === "retry_scheduled" ||
+          deletion.status === "manual_review" ? (
+            <> Current phase: {phaseLabel(deletion.phase)}.</>
+          ) : null}
+          {deletion.failureCode === null ? null : (
+            <>
+              {" "}Support code:{" "}
+              <strong className="code-text">{deletion.failureCode}</strong>.
+            </>
+          )}
         </Notice>
       )}
     </section>

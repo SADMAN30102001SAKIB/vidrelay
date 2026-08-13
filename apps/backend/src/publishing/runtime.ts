@@ -18,6 +18,7 @@ import {
 export interface PublishRuntime {
   attemptNumber: number;
   bindings: Bindings;
+  credentialsEncryptedUsed?: string;
   destinationId: string;
   reconcileOnly: boolean;
   step: WorkflowStep;
@@ -40,15 +41,34 @@ export const unsafeStep = {
   timeout: "5 minutes"
 } satisfies WorkflowStepConfig;
 
+export const sensitiveUnsafeStep = {
+  ...unsafeStep,
+  sensitive: "output" as const
+} satisfies WorkflowStepConfig;
+
 export const currentContext = async (
   runtime: PublishRuntime
 ): Promise<PublishContext> => {
-  const context = await loadPublishContext(runtime.bindings, runtime.destinationId);
+  const context = await loadPublishContext(
+    runtime.bindings,
+    runtime.destinationId
+  );
   if (context?.destination.attemptNumber !== runtime.attemptNumber) {
-    throw new NonRetryableError("The publication attempt is no longer current.");
+    throw new NonRetryableError(
+      "The publication attempt is no longer current."
+    );
   }
-  if (context.destination.status === "cancelled") {
-    throw new NonRetryableError("The publication was cancelled.");
+  if (
+    ![
+      "queued",
+      "starting",
+      "transferring",
+      "processing",
+      "publishing",
+      "retry_scheduled"
+    ].includes(context.destination.status)
+  ) {
+    throw new NonRetryableError("The publication attempt is no longer active.");
   }
   if (context.upload.status !== "ready") {
     throw new ProviderError({
@@ -68,30 +88,40 @@ export const currentContext = async (
 export const freshCredentials = async (
   runtime: PublishRuntime,
   context: PublishContext
-): Promise<StoredCredentials> =>
-  await ensureFreshCredentials(
+): Promise<StoredCredentials> => {
+  runtime.credentialsEncryptedUsed = context.connection.credentialsEncrypted;
+  const fresh = await ensureFreshCredentials(
     createDb(runtime.bindings.DB),
     runtime.bindings,
     context.connection
   );
+  runtime.credentialsEncryptedUsed = fresh.credentialsEncrypted;
+  return fresh.credentials;
+};
 
-export const storeRemoteUploadUrl = async (
+export const protectRemoteUploadUrl = async (
   runtime: PublishRuntime,
-  remoteSessionId: string,
-  url: string,
-  stage: string
-): Promise<void> => {
-  const encrypted = await encryptJson(
+  url: string
+): Promise<string> =>
+  await encryptJson(
     { url },
     requireSecret(runtime.bindings.TOKEN_ENCRYPTION_KEY, "TOKEN_ENCRYPTION_KEY")
   );
+
+export const storeProtectedRemoteUploadUrl = async (
+  runtime: PublishRuntime,
+  remoteSessionId: string,
+  encryptedUrl: string,
+  stage: string
+): Promise<void> => {
   await updateDestination(
     runtime.bindings,
     runtime.destinationId,
     runtime.attemptNumber,
     {
       remoteSessionId,
-      remoteUploadUrlEncrypted: encrypted,
+      remoteUploadUrlEncrypted: encryptedUrl,
+      outcomeUnknown: false,
       stage,
       status: "starting"
     }

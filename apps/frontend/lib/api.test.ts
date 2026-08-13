@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  apiRequest,
-  resolveApiUrl,
-  sessionExpiredEvent
-} from "./api";
+import { apiRequest, resolveApiUrl, sessionExpiredEvent } from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();

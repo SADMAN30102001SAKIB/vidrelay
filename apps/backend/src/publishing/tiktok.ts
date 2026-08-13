@@ -140,7 +140,8 @@ const requestTikTok = async (
       envelope.data.error.message,
       response.status,
       options.failureOutcomeUnknown &&
-        (response.status >= 500 || envelope.data.error.code === "internal_error")
+        (response.status >= 500 ||
+          envelope.data.error.code === "internal_error")
     );
   }
   if (!response.ok) {
@@ -518,6 +519,27 @@ export const publishTikTok = async (runtime: PublishRuntime): Promise<void> => {
   );
   validateCreatorInfo(runtime, creator, settings, context.upload.durationMs);
 
+  await runtime.step.do(
+    "tiktok-record-provider-commit-intent",
+    safeStep,
+    async () => {
+      const current = await currentContext(runtime);
+      if (current.destination.remoteSessionId === null) {
+        await updateDestination(
+          runtime.bindings,
+          runtime.destinationId,
+          runtime.attemptNumber,
+          {
+            outcomeUnknown: true,
+            stage: "provider_commit_started",
+            status: "starting"
+          }
+        );
+      }
+      return { recorded: true };
+    }
+  );
+
   const init = await runtime.step.do(
     "tiktok-direct-post-init",
     unsafeStep,
@@ -605,6 +627,7 @@ export const publishTikTok = async (runtime: PublishRuntime): Promise<void> => {
         runtime.attemptNumber,
         {
           nextPollAt: Date.now(),
+          outcomeUnknown: false,
           remoteSessionId: init.publishId,
           stage: "remote_session_created",
           status: "processing"

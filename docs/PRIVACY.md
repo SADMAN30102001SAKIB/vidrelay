@@ -13,15 +13,15 @@ match the deployed behavior and every provider's terms.
 | D1              | Hashed session tokens, hashed OAuth state, encrypted PKCE verifier, rate-limit/security records             | Session and OAuth security                                        |
 | D1              | Provider account ID/name/avatar/metadata, granted scopes, encrypted access/refresh credentials              | Connect and publish to an authorized destination                  |
 | D1              | Upload metadata, validation results, post captions/settings, destination attempts, provider IDs/URLs/errors | Media validation, publishing, history, safe retry/reconciliation  |
-| D1              | Audit events and account-deletion requests                                                                  | Security, support, deletion proof, and operational accountability |
+| D1              | Audit events, signed-webhook event hashes/status, and account-deletion requests                             | Security, replay control, support, deletion proof, and operations |
 | Private R2      | Customer-uploaded source video                                                                              | Preview and provider transfer                                     |
 | Cloudflare logs | Request ID, route/status, and deliberately sanitized operational errors                                     | Availability, debugging, and incident response                    |
-| Meta/Google     | OAuth identity, source media, requested metadata, and provider-side post/processing data                    | User-requested external publishing                                |
+| Providers       | OAuth identity, source media, requested metadata, and provider-side post/processing data                    | User-requested external publishing                                |
 
-Cloudflare hosts the frontend, Worker, D1, R2, and Workflow execution. Meta and
-Google become independent processors/controllers under their own terms when a
-customer connects an account or publishes content. TikTok is not a v1 processor
-because its integration must remain disabled and unconfigured.
+Cloudflare hosts the frontend, Worker, D1, R2, and Workflow execution. Meta,
+Google, and TikTok become independent processors/controllers under their own
+terms when a customer connects an account or publishes content. A provider kept
+disabled and unconfigured for a customer release does not receive customer data.
 
 ## Security properties
 
@@ -64,32 +64,42 @@ those systems and deletion windows based on the actual production configuration.
 
 - Disconnecting a provider attempts token revocation and makes the stored local
   credential unusable. It does not delete provider-side posts.
-- A user can delete an unused upload through the product/API. Media referenced by
-  a post is retained to preserve the publishing/history lifecycle.
+- A user can remove an unused upload or a post's source media after every
+  destination is published or explicitly cancelled. The D1 post, destination,
+  attempt, and audit history remains, and provider-side posts are unaffected.
+- A customer can explicitly abandon future retries for a known terminal failure
+  before removing its source. An uncertain provider outcome must first be
+  reconciled; VidRelay never treats uncertainty as safe to delete or retry.
 - Self-service account deletion currently supports only a sole owner in one
   single-member workspace. Team/workspace transfer and multi-member deletion need
   an operator process or product work before those account models are offered.
-- Account deletion invalidates sessions, cancels non-terminal local work, attempts
-  provider revocation, removes workspace videos from R2, and deletes account/workspace
+- Account deletion invalidates sessions, cancels clearly unsent work, records
+  active or provider-committed work as outcome-unknown, attempts provider
+  revocation, removes workspace videos from R2, and deletes account/workspace
   rows from D1.
-- Provider revocation is best effort. Local deletion continues when a provider is
-  unavailable, and the failure is logged for operations.
-- Content already published to Facebook, Instagram, or YouTube remains under the
-  provider account. The user must delete it there; VidRelay cannot promise its
+- A transient provider-revocation or R2 cleanup failure receives bounded
+  exponential retries. After five failed attempts, the request enters
+  `manual_review`; an operator can audit and explicitly resume it after fixing
+  the cause. Do not claim completion while a grant or media cleanup is unresolved.
+- Content already published to any provider remains under that provider account.
+  A publish accepted immediately before deletion may also finish afterward. The
+  user must inspect and delete such content there; VidRelay cannot promise its
   removal.
-- Minimal de-identified audit and deletion-request records may remain after account
-  deletion because their user/workspace references are cleared. Publish the actual
+- Minimal pseudonymous audit and deletion-request records may remain after account
+  deletion because their user/workspace foreign keys are cleared. Free-form audit
+  entity identifiers and metadata are not proven anonymous. Publish the actual
   retention period once the business adopts one.
 
-The one-time deletion-status reference is a bearer secret. Display it once, advise
-the user to store it safely, and never log or send it to analytics.
+The deletion-status reference is a reusable bearer secret returned only when the
+request is created. Display it once, advise the user to store it safely, and never
+log or send it to analytics.
 
 ## Launch privacy checklist
 
 - Inventory production D1/R2/log/backup locations, subprocessors, regions, and
   configured retention.
-- Confirm the public policy matches the three launched providers and does not list
-  TikTok as active.
+- Confirm the public policy matches exactly the providers enabled for that
+  customer release.
 - Publish working privacy, terms, support, and deletion URLs before provider review;
   use the same URLs in provider consoles and the product.
 - Define data-subject access/correction/export/deletion and law-enforcement/support

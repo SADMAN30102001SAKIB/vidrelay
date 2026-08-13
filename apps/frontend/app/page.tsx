@@ -1,3 +1,5 @@
+"use client";
+
 import { Cable, ListChecks, Send, UploadCloud } from "lucide-react";
 import Link from "next/link";
 
@@ -6,6 +8,7 @@ import type { LucideIcon } from "lucide-react";
 import { CapabilityOverview } from "@/components/CapabilityOverview";
 import { PublicShell } from "@/components/PublicChrome";
 import { PlatformMark, StatusBadge, buttonClass } from "@/components/ui";
+import { useSession } from "@/providers/SessionProvider";
 
 const features: Array<{ copy: string; icon: LucideIcon; title: string }> = [
   {
@@ -31,6 +34,7 @@ const features: Array<{ copy: string; icon: LucideIcon; title: string }> = [
 ];
 
 export default function HomePage() {
+  const { config } = useSession();
   return (
     <PublicShell>
       <section className="hero">
@@ -48,9 +52,11 @@ export default function HomePage() {
             one place.
           </p>
           <div className="button-row">
-            <Link className={buttonClass("primary")} href="/auth/signup">
-              Create an account
-            </Link>
+            {config?.signupsEnabled === true ? (
+              <Link className={buttonClass("primary")} href="/auth/signup">
+                Create an account
+              </Link>
+            ) : null}
             <Link className={buttonClass("secondary")} href="/auth/login">
               Log in
             </Link>

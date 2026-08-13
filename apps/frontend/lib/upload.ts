@@ -22,7 +22,7 @@ export interface PersistedUpload {
   multipart: MultipartDescriptor;
 }
 
-export const uploadStorageKey = "vidrelay.active-upload.v1";
+const uploadStorageKey = "vidrelay.active-upload.v1";
 
 export const fileFingerprint = (file: File): string =>
   [file.name, file.size, file.lastModified].join(":");

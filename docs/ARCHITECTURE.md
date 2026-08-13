@@ -29,7 +29,8 @@ Cloudflare resources:
 - **Workflows (`PUBLISH_WORKFLOW`)** isolates a durable publish lifecycle for each
   destination attempt.
 - A **scheduled trigger every five minutes** retries undispatched outbox work,
-  processes account deletion requests, and cleans expired security records.
+  processes account deletion requests, cleans expired security/media records, and
+  moves stale active publishing attempts into a safe recovery state.
 
 ## Request and security model
 
@@ -50,8 +51,8 @@ accepted media profile, and whether signups are open.
 
 ## Upload lifecycle
 
-1. An authenticated user creates an upload record with filename, MP4 MIME type,
-   and declared size.
+1. An authenticated user atomically reserves workspace quota in D1 with filename,
+   MP4 MIME type, and declared size before R2 multipart creation.
 2. In local `worker_proxy` mode the browser sends multipart data through the API.
    In production `direct` mode, the API creates an R2 multipart upload and signs
    short-lived S3-compatible URLs for requested part numbers.
@@ -61,6 +62,9 @@ accepted media profile, and whether signups are open.
    the stored object size, and reads bounded MP4 metadata ranges from private R2.
 5. Invalid media is rejected. Valid media becomes `ready` and can be previewed
    through a short-lived signed media lease.
+6. A source can be removed after all referencing destinations are published or
+   explicitly cancelled. R2 quota is released only after deletion is confirmed;
+   post and attempt evidence remains in D1.
 
 VidRelay does not currently transcode, crop, normalize loudness, or repair an MP4.
 Validation against the common profile reduces cross-platform failures but cannot
@@ -79,9 +83,10 @@ override a provider's own content, copyright, account, quota, or policy checks.
    is the durable backstop for an outbox event not yet dispatched.
 5. Each outbox event creates a Workflow instance named from destination ID and
    attempt number. A destination therefore fails or succeeds independently.
-6. Safe preparation, transfer, and polling steps may retry with bounded backoff.
-   The provider call that can create a public post is treated as unsafe and is not
-   blindly replayed.
+6. Safe preparation and polling steps may retry with bounded backoff. Provider
+   effects that create sessions, transfer media, or publish are zero-retry steps;
+   their returned identifiers are checkpointed separately. Bearer upload URLs are
+   encrypted before they can enter durable step output.
 7. The Worker stores provider session/post identifiers and polls processing state.
    A confirmed provider post becomes `published` with its provider URL when one is
    available.
@@ -101,8 +106,8 @@ destinations remain `publishing`; terminal failures become `failed`.
 - Instagram: caption and whether to share the Reel to the feed.
 - YouTube: title, description, category, privacy, made-for-kids declaration, and
   synthetic-media declaration.
-- TikTok fields and future-facing publishing plumbing exist, but are not a v1
-  release commitment.
+- TikTok: target creator, title, privacy from current creator options, interaction
+  controls, commercial-content and AI disclosures, preview, and rights consent.
 
 ## Account deletion lifecycle
 
@@ -110,23 +115,25 @@ Deletion requires the current password and the exact confirmation text
 `DELETE MY ACCOUNT`. The current self-service flow supports only the sole owner of
 a single-member, single-workspace account.
 
-The request immediately invalidates sessions and cancels non-terminal local
-publishing work. Scheduled processing then attempts provider token revocation,
-deletes workspace R2 objects, and deletes the user/workspace records. Revocation is
-best effort so an unavailable provider cannot indefinitely block local deletion.
-A one-time opaque reference allows status lookup without a session.
+The request immediately invalidates sessions, cancels only clearly unsent work,
+and marks provider-committed active work outcome-unknown. Scheduled processing
+then attempts provider token revocation, deletes workspace R2 objects, and deletes
+the user/workspace records. Provider/storage failures receive bounded exponential
+retry; after five attempts the request requires audited operator intervention
+instead of retrying forever. An opaque bearer reference, returned once and
+reusable by its holder, allows status lookup without a session.
 
-Deletion does **not** delete content already published to Facebook, Instagram, or
-YouTube. The customer must delete that content at the provider. Minimal deletion
-proof and de-identified audit records may remain; the operator must adopt and
-document an explicit retention period before launch.
+Deletion does **not** delete content already published to a provider. A provider
+effect accepted just before deletion may also complete after the local workflow is
+cancelled. The customer must inspect and delete that content at the provider.
+Minimal deletion proof and pseudonymous audit records may remain; the operator
+must adopt and document an explicit retention period before launch.
 
 ## Deliberate limits
 
-- v1 supports Facebook Pages, Instagram Professional accounts, and YouTube
-  channels—not personal Facebook or Instagram accounts.
-- TikTok is not part of the v1 launch even though shared contracts/configuration
-  reserve the platform.
+- Supported targets are Facebook Pages, Instagram Professional accounts, YouTube
+  channels, and capability-eligible TikTok creators—not personal Facebook or
+  Instagram accounts. A customer release can keep any provider disabled.
 - There is no transcoding service, scheduling UI, team-management UI, billing,
   content moderation system, or guarantee of provider acceptance.
 - The API uses at-least-once infrastructure with application idempotency; it does

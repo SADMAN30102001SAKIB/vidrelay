@@ -11,7 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { clsx } from "clsx";
 
-import type { User } from "@vidrelay/shared";
+import type { DeletionView, User } from "@vidrelay/shared";
 import type { FormEvent } from "react";
 
 import {
@@ -35,13 +35,6 @@ interface AccountSession {
   id: string;
   lastSeenAt: number;
   userAgent: string | null;
-}
-
-interface DeletionView {
-  completedAt: number | null;
-  id: string;
-  requestedAt: number;
-  status: "complete" | "failed" | "processing" | "requested";
 }
 
 const tabFromQuery = (value: string | null): SettingsTab =>
@@ -227,13 +220,19 @@ function SettingsContent() {
         body: JSON.stringify(parsed.data),
         method: "POST"
       });
-      localStorage.setItem("vidrelay.deletion-reference", body.reference);
       setDeletion(body.deletion);
       setDeletionReference(body.reference);
       setDeletionPassword("");
       setSuccess(
         "Deletion was requested and your server-side sessions were closed. Save the private reference below."
       );
+      try {
+        localStorage.setItem("vidrelay.deletion-reference", body.reference);
+      } catch {
+        setSuccess(
+          "Deletion was requested and your server-side sessions were closed. Browser storage was unavailable, so copy the private reference below now."
+        );
+      }
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -431,13 +430,15 @@ function SettingsContent() {
               <div className="summary-row">
                 <span>Latest request</span>
                 <StatusBadge
-                  label={deletion.status}
+                  label={deletion.status.replaceAll("_", " ")}
                   tone={
                     deletion.status === "complete"
                       ? "success"
-                      : deletion.status === "failed"
+                      : deletion.status === "manual_review"
                         ? "danger"
-                        : "info"
+                        : deletion.status === "retry_scheduled"
+                          ? "warning"
+                          : "info"
                   }
                 />
               </div>
@@ -447,16 +448,56 @@ function SettingsContent() {
                   {formatDate(deletion.requestedAt, user?.workspace.timezone)}
                 </strong>
               </div>
+              {deletion.nextAttemptAt === null ? null : (
+                <div className="summary-row">
+                  <span>Next automatic attempt</span>
+                  <strong>
+                    {formatDate(
+                      deletion.nextAttemptAt,
+                      user?.workspace.timezone
+                    )}
+                  </strong>
+                </div>
+              )}
+              {deletion.status === "processing" ||
+              deletion.status === "retry_scheduled" ||
+              deletion.status === "manual_review" ? (
+                <div className="summary-row">
+                  <span>Current phase</span>
+                  <strong>{deletion.phase.replaceAll("_", " ")}</strong>
+                </div>
+              ) : null}
             </div>
           )}
+          {deletion?.status === "manual_review" ? (
+            <Notice tone="danger">
+              Automatic deletion could not finish. Contact the service operator
+              with your private reference
+              {deletion.failureCode === null ? "." : (
+                <>
+                  {" "}and support code{" "}
+                  <strong className="code-text">
+                    {deletion.failureCode}
+                  </strong>
+                  .
+                </>
+              )}
+            </Notice>
+          ) : null}
           {deletionReference === null ? null : (
             <Notice tone="success">
               Private status reference:{" "}
-              <strong className="code-text">{deletionReference}</strong>. It has
-              also been saved in this browser for the public status checker.
+              <strong className="code-text">{deletionReference}</strong>. Copy
+              and keep it for the public status checker.
             </Notice>
           )}
-          {deletionReference === null ? (
+          {user?.role === "operator" ? (
+            <Notice tone="info">
+              Service operators cannot delete their own account while they are
+              responsible for deletion recovery. Manage the service operator
+              lifecycle through controlled service administration.
+            </Notice>
+          ) : deletionReference === null ? (
             <form
               className="form-stack"
               onSubmit={event => void requestDeletion(event)}>

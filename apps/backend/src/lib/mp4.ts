@@ -58,7 +58,11 @@ const boxAt = (data: Uint8Array, start: number, limit: number): Box | null => {
     size = limit - start;
   }
 
-  if (size < headerSize || start + size > limit || !Number.isSafeInteger(size)) {
+  if (
+    size < headerSize ||
+    start + size > limit ||
+    !Number.isSafeInteger(size)
+  ) {
     return null;
   }
 
@@ -117,9 +121,63 @@ const sampleCodec = (data: Uint8Array, stsd: Box): string | null => {
     return "h264";
   }
   if (type === "mp4a") {
-    return "aac";
+    for (let offset = entryStart + 8; offset + 3 < stsd.end; offset += 1) {
+      if (data[offset] !== 0x04) {
+        continue;
+      }
+      let cursor = offset + 1;
+      let length = 0;
+      for (let index = 0; index < 4 && cursor < stsd.end; index += 1) {
+        const value = data[cursor] ?? 0;
+        cursor += 1;
+        length = (length << 7) | (value & 0x7f);
+        if ((value & 0x80) === 0) {
+          break;
+        }
+      }
+      const objectType = data[cursor];
+      if (
+        length > 0 &&
+        cursor + length <= stsd.end &&
+        objectType !== undefined &&
+        [0x40, 0x66, 0x67, 0x68].includes(objectType)
+      ) {
+        return "aac";
+      }
+    }
+    return "mp4a";
   }
   return type.trim().length > 0 ? type : null;
+};
+
+const audioSampleRate = (data: Uint8Array, stsd: Box): number | null => {
+  const entryStart = stsd.dataStart + 8;
+  return entryStart + 36 <= stsd.end
+    ? Math.round(uint32(data, entryStart + 32) / 65_536)
+    : null;
+};
+
+const sampleBytes = (data: Uint8Array, stsz: Box): number | null => {
+  if (stsz.dataStart + 12 > stsz.end) {
+    return null;
+  }
+  const constantSize = uint32(data, stsz.dataStart + 4);
+  const count = uint32(data, stsz.dataStart + 8);
+  if (count === 0 || count > 1_000_000) {
+    return null;
+  }
+  if (constantSize > 0) {
+    const total = constantSize * count;
+    return Number.isSafeInteger(total) ? total : null;
+  }
+  if (stsz.dataStart + 12 + count * 4 > stsz.end) {
+    return null;
+  }
+  let total = 0;
+  for (let index = 0; index < count; index += 1) {
+    total += uint32(data, stsz.dataStart + 12 + index * 4);
+  }
+  return Number.isSafeInteger(total) ? total : null;
 };
 
 const averageFps = (
@@ -167,12 +225,25 @@ const findTopLevel = async (
   bucket: R2Bucket,
   key: string,
   size: number
-): Promise<{ hasFtyp: boolean; moovOffset: number; moovSize: number } | null> => {
+): Promise<{
+  hasFtyp: boolean;
+  hasMdat: boolean;
+  moovOffset: number;
+  moovSize: number;
+} | null> => {
   let hasFtyp = false;
+  let hasMdat = false;
+  let moovOffset: number | null = null;
+  let moovSize = 0;
   let offset = 0;
   let boxes = 0;
   while (offset + 8 <= size && boxes < maximumTopLevelBoxes) {
-    const header = await readRange(bucket, key, offset, Math.min(16, size - offset));
+    const header = await readRange(
+      bucket,
+      key,
+      offset,
+      Math.min(16, size - offset)
+    );
     if (header.byteLength < 8) {
       return null;
     }
@@ -187,18 +258,26 @@ const findTopLevel = async (
     } else if (size32 === 0) {
       boxSize = size - offset;
     }
-    if (boxSize < 8 || !Number.isSafeInteger(boxSize) || offset + boxSize > size) {
+    if (
+      boxSize < 8 ||
+      !Number.isSafeInteger(boxSize) ||
+      offset + boxSize > size
+    ) {
       return null;
     }
 
     hasFtyp ||= type === "ftyp";
+    hasMdat ||= type === "mdat" && boxSize > 8;
     if (type === "moov") {
-      return { hasFtyp, moovOffset: offset, moovSize: boxSize };
+      moovOffset = offset;
+      moovSize = boxSize;
     }
     offset += boxSize;
     boxes += 1;
   }
-  return null;
+  return moovOffset === null
+    ? null
+    : { hasFtyp, hasMdat, moovOffset, moovSize };
 };
 
 export const inspectMp4 = async (
@@ -224,8 +303,13 @@ export const inspectMp4 = async (
   if (!top.hasFtyp) {
     errors.push("The MP4 file type box is missing.");
   }
+  if (!top.hasMdat) {
+    errors.push("The MP4 media-data box is missing or empty.");
+  }
   if (top.moovSize > maximumMoovBytes) {
-    errors.push("The MP4 metadata is unusually large and cannot be verified safely.");
+    errors.push(
+      "The MP4 metadata is unusually large and cannot be verified safely."
+    );
     return {
       audioCodec: null,
       durationMs: null,
@@ -265,6 +349,9 @@ export const inspectMp4 = async (
   let videoCodec: string | null = null;
   let audioCodec: string | null = null;
   let fps: number | null = null;
+  let audioSampleRateHz: number | null = null;
+  let audioBitrateBps: number | null = null;
+  let videoBitrateBps: number | null = null;
 
   for (const track of children(data, moov).filter(box => box.type === "trak")) {
     const tkhd = child(data, track, "tkhd");
@@ -281,6 +368,7 @@ export const inspectMp4 = async (
     const minf = child(data, mdia, "minf");
     const stbl = minf === null ? null : child(data, minf, "stbl");
     const stsd = stbl === null ? null : child(data, stbl, "stsd");
+    const stsz = stbl === null ? null : child(data, stbl, "stsz");
     const codec = stsd === null ? null : sampleCodec(data, stsd);
 
     if (handler === "vide") {
@@ -292,11 +380,26 @@ export const inspectMp4 = async (
       const trackTime = mdhd === null ? null : mediaTime(data, mdhd);
       const stts = stbl === null ? null : child(data, stbl, "stts");
       if (trackTime !== null && trackTime.timescale > 0) {
-        durationMs ??= Math.round((trackTime.duration * 1000) / trackTime.timescale);
-        fps = stts === null ? null : averageFps(data, stts, trackTime.timescale);
+        durationMs ??= Math.round(
+          (trackTime.duration * 1000) / trackTime.timescale
+        );
+        fps =
+          stts === null ? null : averageFps(data, stts, trackTime.timescale);
+        const bytes = stsz === null ? null : sampleBytes(data, stsz);
+        if (bytes !== null && trackTime.duration > 0) {
+          videoBitrateBps =
+            (bytes * 8 * trackTime.timescale) / trackTime.duration;
+        }
       }
     } else if (handler === "soun") {
       audioCodec = codec;
+      audioSampleRateHz = stsd === null ? null : audioSampleRate(data, stsd);
+      const trackTime = mdhd === null ? null : mediaTime(data, mdhd);
+      const bytes = stsz === null ? null : sampleBytes(data, stsz);
+      if (trackTime !== null && trackTime.duration > 0 && bytes !== null) {
+        audioBitrateBps =
+          (bytes * 8 * trackTime.timescale) / trackTime.duration;
+      }
     }
   }
 
@@ -323,6 +426,13 @@ export const inspectMp4 = async (
           "."
       );
     }
+    if (roundedWidth > commonMediaProfile.maxWidth) {
+      errors.push(
+        "Video width must not exceed " +
+          String(commonMediaProfile.maxWidth) +
+          " pixels."
+      );
+    }
     const ratio = roundedWidth / roundedHeight;
     if (Math.abs(ratio - 9 / 16) > 0.005) {
       errors.push("Video must use a vertical 9:16 aspect ratio.");
@@ -343,14 +453,49 @@ export const inspectMp4 = async (
     );
   }
   if (fps === null) {
-    warnings.push("Frame rate could not be verified from the MP4 timing table.");
-  } else if (fps < commonMediaProfile.fps.min || fps > commonMediaProfile.fps.max) {
+    errors.push("Frame rate could not be verified from the MP4 timing table.");
+  } else if (
+    fps < commonMediaProfile.fps.min ||
+    fps > commonMediaProfile.fps.max
+  ) {
     errors.push(
       "Frame rate must be between " +
         String(commonMediaProfile.fps.min) +
         " and " +
         String(commonMediaProfile.fps.max) +
         " FPS."
+    );
+  }
+  if (audioSampleRateHz !== commonMediaProfile.audioSampleRateHz) {
+    errors.push(
+      "AAC audio must use a " +
+        String(commonMediaProfile.audioSampleRateHz) +
+        " Hz sample rate."
+    );
+  }
+  if (
+    audioBitrateBps !== null &&
+    audioBitrateBps > commonMediaProfile.maxAudioBitrateBps
+  ) {
+    errors.push(
+      "Audio bitrate must not exceed " +
+        String(commonMediaProfile.maxAudioBitrateBps / 1000) +
+        " kbps."
+    );
+  }
+  if (
+    videoBitrateBps !== null &&
+    videoBitrateBps > commonMediaProfile.maxVideoBitrateBps
+  ) {
+    errors.push(
+      "Video bitrate must not exceed " +
+        String(commonMediaProfile.maxVideoBitrateBps / 1_000_000) +
+        " Mbps."
+    );
+  }
+  if (audioBitrateBps === null || videoBitrateBps === null) {
+    warnings.push(
+      "One or more track bitrates could not be verified from the MP4 sample table."
     );
   }
 

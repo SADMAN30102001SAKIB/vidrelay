@@ -50,7 +50,10 @@ const resolveAuth = async (
   }
 
   if (now - row.sessionLastSeenAt > 15 * 60 * 1000) {
-    await db.update(sessions).set({ lastSeenAt: now }).where(eq(sessions.id, sessionHash));
+    await db
+      .update(sessions)
+      .set({ lastSeenAt: now })
+      .where(eq(sessions.id, sessionHash));
   }
 
   return {
@@ -64,7 +67,11 @@ const resolveAuth = async (
 export const requireAuth: MiddlewareHandler<AppEnv> = async (context, next) => {
   const auth = await resolveAuth(context.req.raw, context.env.DB);
   if (auth === null) {
-    throw new AppError(401, "authentication_required", "Please sign in to continue.");
+    throw new AppError(
+      401,
+      "authentication_required",
+      "Please sign in to continue."
+    );
   }
 
   context.set("auth", auth);

@@ -6,9 +6,11 @@ import { finishDestination, updateDestination } from "./repository";
 import {
   currentContext,
   freshCredentials,
+  protectRemoteUploadUrl,
   readRemoteUploadUrl,
   safeStep,
-  storeRemoteUploadUrl,
+  sensitiveUnsafeStep,
+  storeProtectedRemoteUploadUrl,
   type PublishRuntime
 } from "./runtime";
 
@@ -26,7 +28,8 @@ const parseVideo = async (response: Response): Promise<string> => {
 const youtubeError = async (
   response: Response,
   operation: string,
-  retryable: boolean
+  retryable: boolean,
+  outcomeUnknown = false
 ): Promise<ProviderError> => {
   let message = "YouTube rejected the request.";
   try {
@@ -37,7 +40,10 @@ const youtubeError = async (
       .parse(await response.json());
     message = body.error?.message?.slice(0, 300) ?? message;
   } catch {
-    message = "YouTube rejected the request with status " + String(response.status) + ".";
+    message =
+      "YouTube rejected the request with status " +
+      String(response.status) +
+      ".";
   }
   return new ProviderError({
     code: response.status === 401 ? "reauth_required" : operation,
@@ -46,6 +52,7 @@ const youtubeError = async (
         ? "Reconnect the YouTube channel before publishing again."
         : message,
     providerStatus: response.status,
+    outcomeUnknown,
     retryable
   });
 };
@@ -53,7 +60,8 @@ const youtubeError = async (
 const fetchYoutube = async (
   url: string,
   init: RequestInit,
-  operation: string
+  operation: string,
+  outcomeUnknown = false
 ): Promise<Response> => {
   try {
     return await fetch(url, init);
@@ -61,6 +69,7 @@ const fetchYoutube = async (
     throw new ProviderError({
       code: operation + "_network_error",
       message: "The YouTube request did not return a response.",
+      outcomeUnknown,
       retryable: true
     });
   }
@@ -99,7 +108,11 @@ const probeUpload = async (
     };
   }
   if (response.status === 200 || response.status === 201) {
-    return { complete: true, offset: size, videoId: await parseVideo(response) };
+    return {
+      complete: true,
+      offset: size,
+      videoId: await parseVideo(response)
+    };
   }
   if (response.status === 404 || response.status === 410) {
     throw new ProviderError({
@@ -191,17 +204,25 @@ const confirmYoutube = async (
     if (status.failure !== null) {
       throw new ProviderError({
         code: "youtube_processing_failed",
-        message: "YouTube failed to process the video: " + status.failure.slice(0, 200)
+        message:
+          "YouTube failed to process the video: " + status.failure.slice(0, 200)
       });
     }
     if (status.succeeded) {
-      await finishDestination(runtime.bindings, {
-        attemptNumber: runtime.attemptNumber,
-        destinationId: runtime.destinationId,
-        providerPostId: videoId,
-        stage: "confirmed",
-        status: "published"
-      });
+      await runtime.step.do(
+        "youtube-confirm-published-video-" + String(index),
+        safeStep,
+        async () => {
+          await finishDestination(runtime.bindings, {
+            attemptNumber: runtime.attemptNumber,
+            destinationId: runtime.destinationId,
+            providerPostId: videoId,
+            stage: "confirmed",
+            status: "published"
+          });
+          return { published: true };
+        }
+      );
       return;
     }
     await runtime.step.sleep(
@@ -216,12 +237,13 @@ const confirmYoutube = async (
   });
 };
 
-export const publishYoutube = async (runtime: PublishRuntime): Promise<void> => {
+export const publishYoutube = async (
+  runtime: PublishRuntime
+): Promise<void> => {
   let context = await currentContext(runtime);
   const settings = youtubeSettingsSchema.parse(
     JSON.parse(context.destination.settingsJson)
   );
-  const credentials = await freshCredentials(runtime, context);
 
   if (context.destination.remotePostId !== null) {
     await confirmYoutube(runtime, context.destination.remotePostId);
@@ -236,27 +258,43 @@ export const publishYoutube = async (runtime: PublishRuntime): Promise<void> => 
         outcomeUnknown: true
       });
     }
-    const sessionUrl = await readRemoteUploadUrl(runtime, context);
-    const probe = await probeUpload(
-      sessionUrl,
-      credentials.accessToken,
-      context.upload.expectedSize
+    const probe = await runtime.step.do(
+      "youtube-reconcile-resumable-session",
+      safeStep,
+      async () => {
+        const current = await currentContext(runtime);
+        const credentials = await freshCredentials(runtime, current);
+        const sessionUrl = await readRemoteUploadUrl(runtime, current);
+        return await probeUpload(
+          sessionUrl,
+          credentials.accessToken,
+          current.upload.expectedSize
+        );
+      }
     );
     if (!probe.complete || probe.videoId === null) {
       throw new ProviderError({
         code: "youtube_upload_incomplete",
-        message: "The YouTube upload is incomplete and can be resumed with Retry."
+        message:
+          "The YouTube upload is incomplete and can be resumed with Retry."
       });
     }
-    await updateDestination(
-      runtime.bindings,
-      runtime.destinationId,
-      runtime.attemptNumber,
-      {
-        remotePostId: probe.videoId,
-        stage: "processing",
-        status: "processing",
-        uploadOffset: probe.offset
+    await runtime.step.do(
+      "youtube-persist-reconciled-upload",
+      safeStep,
+      async () => {
+        await updateDestination(
+          runtime.bindings,
+          runtime.destinationId,
+          runtime.attemptNumber,
+          {
+            remotePostId: probe.videoId,
+            stage: "processing",
+            status: "processing",
+            uploadOffset: probe.offset
+          }
+        );
+        return { persisted: true };
       }
     );
     await confirmYoutube(runtime, probe.videoId);
@@ -264,63 +302,125 @@ export const publishYoutube = async (runtime: PublishRuntime): Promise<void> => 
   }
 
   if (context.destination.remoteUploadUrlEncrypted === null) {
-    await runtime.step.do("youtube-create-resumable-session", safeStep, async () => {
-      const current = await currentContext(runtime);
-      if (current.destination.remoteUploadUrlEncrypted !== null) {
-        return { created: false };
-      }
-      const currentCredentials = await freshCredentials(runtime, current);
-      const response = await fetchYoutube(
-        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet%2Cstatus",
-        {
-          body: JSON.stringify({
-            snippet: {
-              categoryId: settings.categoryId,
-              description: settings.description,
-              title: settings.title
-            },
-            status: {
-              containsSyntheticMedia: settings.containsSyntheticMedia,
-              privacyStatus: settings.privacyStatus,
-              selfDeclaredMadeForKids: settings.madeForKids
+    await runtime.step.do(
+      "youtube-record-provider-commit-intent",
+      safeStep,
+      async () => {
+        const current = await currentContext(runtime);
+        if (current.destination.remoteUploadUrlEncrypted === null) {
+          await updateDestination(
+            runtime.bindings,
+            runtime.destinationId,
+            runtime.attemptNumber,
+            {
+              outcomeUnknown: true,
+              stage: "provider_commit_started",
+              status: "starting"
             }
-          }),
-          headers: {
-            Authorization: "Bearer " + currentCredentials.accessToken,
-            "Content-Type": "application/json; charset=UTF-8",
-            "X-Upload-Content-Length": String(current.upload.expectedSize),
-            "X-Upload-Content-Type": current.upload.mimeType
+          );
+        }
+        return { recorded: true };
+      }
+    );
+    const session = await runtime.step.do(
+      "youtube-create-resumable-session",
+      sensitiveUnsafeStep,
+      async () => {
+        const current = await currentContext(runtime);
+        if (current.destination.remoteUploadUrlEncrypted !== null) {
+          return null;
+        }
+        const currentCredentials = await freshCredentials(runtime, current);
+        const response = await fetchYoutube(
+          "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet%2Cstatus",
+          {
+            body: JSON.stringify({
+              snippet: {
+                categoryId: settings.categoryId,
+                description: settings.description,
+                title: settings.title
+              },
+              status: {
+                containsSyntheticMedia: settings.containsSyntheticMedia,
+                privacyStatus: settings.privacyStatus,
+                selfDeclaredMadeForKids: settings.madeForKids
+              }
+            }),
+            headers: {
+              Authorization: "Bearer " + currentCredentials.accessToken,
+              "Content-Type": "application/json; charset=UTF-8",
+              "X-Upload-Content-Length": String(current.upload.expectedSize),
+              "X-Upload-Content-Type": current.upload.mimeType
+            },
+            method: "POST"
           },
-          method: "POST"
-        },
-        "youtube_session_create"
-      );
-      if (!response.ok) {
-        throw await youtubeError(
-          response,
-          "youtube_session_create_failed",
-          response.status === 429 || response.status >= 500
+          "youtube_session_create",
+          true
         );
+        if (!response.ok) {
+          throw await youtubeError(
+            response,
+            "youtube_session_create_failed",
+            false,
+            response.status >= 500
+          );
+        }
+        const location = response.headers.get("Location");
+        if (location === null) {
+          throw new ProviderError({
+            code: "youtube_session_location_missing",
+            message: "YouTube did not return a resumable upload URL.",
+            outcomeUnknown: true
+          });
+        }
+        const uploadId =
+          new URL(location).searchParams.get("upload_id") ?? "resumable";
+        return {
+          protectedUploadUrl: await protectRemoteUploadUrl(runtime, location),
+          uploadId
+        };
       }
-      const location = response.headers.get("Location");
-      if (location === null) {
-        throw new ProviderError({
-          code: "youtube_session_location_missing",
-          message: "YouTube did not return a resumable upload URL."
-        });
-      }
-      const uploadId = new URL(location).searchParams.get("upload_id") ?? "resumable";
-      await storeRemoteUploadUrl(
-        runtime,
-        uploadId,
-        location,
-        "remote_session_created"
+    );
+    if (session !== null) {
+      await runtime.step.do(
+        "youtube-persist-resumable-session",
+        safeStep,
+        async () => {
+          const current = await currentContext(runtime);
+          if (
+            current.destination.remoteSessionId !== null &&
+            current.destination.remoteSessionId !== session.uploadId
+          ) {
+            throw new ProviderError({
+              code: "youtube_session_id_conflict",
+              message:
+                "A different YouTube upload session is already recorded.",
+              outcomeUnknown: true
+            });
+          }
+          if (current.destination.remoteUploadUrlEncrypted === null) {
+            await storeProtectedRemoteUploadUrl(
+              runtime,
+              session.uploadId,
+              session.protectedUploadUrl,
+              "remote_session_created"
+            );
+          }
+          return { persisted: true };
+        }
       );
-      return { created: true };
-    });
+    }
   }
 
   context = await currentContext(runtime);
+  if (context.destination.remoteUploadUrlEncrypted === null) {
+    throw new ProviderError({
+      code: "youtube_session_identifier_missing",
+      message:
+        "YouTube may have accepted the session request, but no resumable URL was stored.",
+      outcomeUnknown: true
+    });
+  }
   let offset = context.destination.uploadOffset;
   const total = context.upload.expectedSize;
   const chunkSize = 16 * 1024 * 1024;
@@ -347,7 +447,10 @@ export const publishYoutube = async (runtime: PublishRuntime): Promise<void> => 
             current.upload.expectedSize
           );
         } catch (error) {
-          if (error instanceof ProviderError && error.code === "youtube_session_expired") {
+          if (
+            error instanceof ProviderError &&
+            error.code === "youtube_session_expired"
+          ) {
             await updateDestination(
               runtime.bindings,
               runtime.destinationId,

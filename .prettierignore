@@ -2,6 +2,7 @@ node_modules
 .next
 out
 dist
+.wrangler-production-dry-run
 coverage
 .wrangler
 .fallow

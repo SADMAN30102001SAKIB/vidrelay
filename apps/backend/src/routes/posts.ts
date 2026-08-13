@@ -1,17 +1,12 @@
 import {
+  abandonDestinationSchema,
   createPostSchema,
   reconcileDestinationSchema,
+  resolveDestinationSchema,
   retryDestinationSchema,
   type Post
 } from "@vidrelay/shared";
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  lt,
-  or
-} from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
 
 import type { AppEnv } from "../env";
@@ -30,10 +25,14 @@ import { parseJson } from "../lib/json";
 import { toDestination, toUpload } from "../lib/mappers";
 import { requireAuth } from "../middleware/auth";
 import { dispatchOutbox, workflowInstanceId } from "../publishing/outbox";
-import { recomputePostStatus } from "../publishing/repository";
+import {
+  finishDestination,
+  recomputePostStatus
+} from "../publishing/repository";
 
 const buildPost = async (
   db: Database,
+  database: D1Database,
   postId: string,
   workspaceId: string
 ): Promise<Post> => {
@@ -57,6 +56,12 @@ const buildPost = async (
       eq(socialConnections.id, publishDestinations.connectionId)
     )
     .where(eq(publishDestinations.postId, postId));
+  const sourceRemoval = await database
+    .prepare(
+      "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM posts AS referenced_posts WHERE referenced_posts.upload_id = ? AND (NOT EXISTS (SELECT 1 FROM publish_destinations WHERE publish_destinations.post_id = referenced_posts.id) OR EXISTS (SELECT 1 FROM publish_destinations WHERE publish_destinations.post_id = referenced_posts.id AND publish_destinations.status NOT IN ('published', 'cancelled')))) THEN 1 ELSE 0 END AS eligible"
+    )
+    .bind(row.post.uploadId)
+    .first<{ eligible: number }>();
 
   return {
     createdAt: row.post.createdAt,
@@ -65,6 +70,8 @@ const buildPost = async (
     ),
     id: row.post.id,
     sharedCaption: row.post.sharedCaption,
+    sourceRemovalEligible:
+      Number(sourceRemoval?.eligible ?? 0) === 1,
     status: row.post.status,
     submittedAt: row.post.submittedAt,
     updatedAt: row.post.updatedAt,
@@ -81,7 +88,9 @@ const encodeCursor = (createdAt: number, id: string): string =>
 const decodeCursor = (value: string): { createdAt: number; id: string } => {
   try {
     const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
-    const decoded = atob(normalized + "=".repeat((4 - (normalized.length % 4)) % 4));
+    const decoded = atob(
+      normalized + "=".repeat((4 - (normalized.length % 4)) % 4)
+    );
     const separator = decoded.indexOf(":");
     const createdAt = Number(decoded.slice(0, separator));
     const id = decoded.slice(separator + 1);
@@ -95,7 +104,11 @@ const decodeCursor = (value: string): { createdAt: number; id: string } => {
     }
     return { createdAt, id };
   } catch {
-    throw new AppError(400, "invalid_cursor", "The pagination cursor is invalid.");
+    throw new AppError(
+      400,
+      "invalid_cursor",
+      "The pagination cursor is invalid."
+    );
   }
 };
 
@@ -111,14 +124,12 @@ const enforceCapability = (
     !capability.configured ||
     capability.mode === "disabled" ||
     capability.mode === "review_pending" ||
-    (capability.mode === "development_only" && context.env.APP_ENV === "production")
+    (capability.mode === "development_only" &&
+      context.env.APP_ENV === "production")
   ) {
-    throw new AppError(
-      409,
-      "capability_unavailable",
-      capability.message,
-      { platform }
-    );
+    throw new AppError(409, "capability_unavailable", capability.message, {
+      platform
+    });
   }
   if (
     platform === "youtube" &&
@@ -177,19 +188,25 @@ postRoutes.get("/", async context => {
     .limit(21);
   const pageRows = rows.slice(0, 20);
   const items = await Promise.all(
-    pageRows.map(row => buildPost(db, row.id, auth.workspaceId))
+    pageRows.map(row => buildPost(db, context.env.DB, row.id, auth.workspaceId))
   );
   const last = rows.length > 20 ? pageRows[pageRows.length - 1] : undefined;
   return context.json({
     items,
-    nextCursor: last === undefined ? null : encodeCursor(last.createdAt, last.id)
+    nextCursor:
+      last === undefined ? null : encodeCursor(last.createdAt, last.id)
   });
 });
 
 postRoutes.get("/:id", async context => {
   const auth = context.get("auth");
   const db = createDb(context.env.DB);
-  const post = await buildPost(db, context.req.param("id"), auth.workspaceId);
+  const post = await buildPost(
+    db,
+    context.env.DB,
+    context.req.param("id"),
+    auth.workspaceId
+  );
   const attempts = await db
     .select({
       attemptNumber: publishAttempts.attemptNumber,
@@ -229,7 +246,7 @@ postRoutes.post("/", async context => {
   if (existing !== undefined) {
     return context.json({
       idempotentReplay: true,
-      post: await buildPost(db, existing.id, auth.workspaceId)
+      post: await buildPost(db, context.env.DB, existing.id, auth.workspaceId)
     });
   }
 
@@ -245,10 +262,16 @@ postRoutes.post("/", async context => {
     )
     .limit(1);
   if (upload === undefined) {
-    throw new AppError(409, "upload_not_ready", "Choose a verified, ready video.");
+    throw new AppError(
+      409,
+      "upload_not_ready",
+      "Choose a verified, ready video."
+    );
   }
 
-  const connectionIds = input.destinations.map(destination => destination.connectionId);
+  const connectionIds = input.destinations.map(
+    destination => destination.connectionId
+  );
   const connections = await db
     .select()
     .from(socialConnections)
@@ -259,9 +282,15 @@ postRoutes.post("/", async context => {
       )
     );
   if (connections.length !== connectionIds.length) {
-    throw new AppError(422, "invalid_connection", "A selected connection was not found.");
+    throw new AppError(
+      422,
+      "invalid_connection",
+      "A selected connection was not found."
+    );
   }
-  const connectionById = new Map(connections.map(connection => [connection.id, connection]));
+  const connectionById = new Map(
+    connections.map(connection => [connection.id, connection])
+  );
   for (const destination of input.destinations) {
     const connection = connectionById.get(destination.connectionId);
     if (
@@ -341,12 +370,7 @@ postRoutes.post("/", async context => {
       ),
       context.env.DB.prepare(
         "INSERT INTO outbox_events (id, event_type, aggregate_id, attempt_number, created_at) VALUES (?, 'publish_destination', ?, ?, ?)"
-      ).bind(
-        record.workflowId,
-        record.destinationId,
-        record.attemptNumber,
-        now
-      )
+      ).bind(record.workflowId, record.destinationId, record.attemptNumber, now)
     );
   }
 
@@ -366,7 +390,12 @@ postRoutes.post("/", async context => {
     if (replayed !== undefined) {
       return context.json({
         idempotentReplay: true,
-        post: await buildPost(db, replayed.id, auth.workspaceId)
+        post: await buildPost(
+          db,
+          context.env.DB,
+          replayed.id,
+          auth.workspaceId
+        )
       });
     }
     const active = await context.env.DB.prepare(
@@ -398,7 +427,7 @@ postRoutes.post("/", async context => {
   return context.json(
     {
       idempotentReplay: false,
-      post: await buildPost(db, postId, auth.workspaceId)
+      post: await buildPost(db, context.env.DB, postId, auth.workspaceId)
     },
     202
   );
@@ -434,7 +463,11 @@ postRoutes.post("/:postId/destinations/:destinationId/retry", async context => {
     )
     .limit(1);
   if (row === undefined) {
-    throw new AppError(404, "destination_not_found", "The destination was not found.");
+    throw new AppError(
+      404,
+      "destination_not_found",
+      "The destination was not found."
+    );
   }
   if (
     !retryableStatuses.includes(
@@ -502,7 +535,11 @@ postRoutes.post("/:postId/destinations/:destinationId/retry", async context => {
       );
     }
   } catch {
-    throw new AppError(409, "retry_conflict", "A retry has already been requested.");
+    throw new AppError(
+      409,
+      "retry_conflict",
+      "A retry has already been requested."
+    );
   }
   await writeAuditEvent(db, {
     action: "destination.retry_requested",
@@ -514,95 +551,359 @@ postRoutes.post("/:postId/destinations/:destinationId/retry", async context => {
   });
   context.executionCtx.waitUntil(dispatchOutbox(context.env));
   return context.json(
-    { post: await buildPost(db, row.destination.postId, auth.workspaceId) },
-    202
-  );
-});
-
-postRoutes.post("/:postId/destinations/:destinationId/reconcile", async context => {
-  await parseJson(context, reconcileDestinationSchema);
-  const auth = context.get("auth");
-  const db = createDb(context.env.DB);
-  const [row] = await db
-    .select({ destination: publishDestinations })
-    .from(publishDestinations)
-    .innerJoin(posts, eq(posts.id, publishDestinations.postId))
-    .where(
-      and(
-        eq(publishDestinations.id, context.req.param("destinationId")),
-        eq(publishDestinations.postId, context.req.param("postId")),
-        eq(posts.workspaceId, auth.workspaceId)
+    {
+      post: await buildPost(
+        db,
+        context.env.DB,
+        row.destination.postId,
+        auth.workspaceId
       )
-    )
-    .limit(1);
-  if (row?.destination.status !== "reconciliation_required") {
-    throw new AppError(
-      409,
-      "reconciliation_unavailable",
-      "This destination is not awaiting reconciliation."
-    );
-  }
-  if (
-    (row.destination.remoteSessionId === null &&
-      row.destination.remotePostId === null) ||
-    (row.destination.platform === "instagram" && row.destination.remotePostId === null)
-  ) {
-    throw new AppError(
-      409,
-      "manual_provider_check_required",
-      "No provider identifier is available for safe automatic reconciliation. Check the provider account before requesting a retry."
-    );
-  }
-
-  const attemptNumber = row.destination.attemptNumber + 1;
-  const workflowId = workflowInstanceId(row.destination.id, attemptNumber);
-  const now = Date.now();
-  const results = await context.env.DB.batch([
-    context.env.DB.prepare(
-      "UPDATE publish_destinations SET status = 'queued', stage = 'reconcile_only', attempt_number = ?, workflow_instance_id = NULL, next_poll_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = ? WHERE id = ? AND attempt_number = ? AND status = 'reconciliation_required' AND EXISTS (SELECT 1 FROM social_connections INNER JOIN posts ON posts.id = publish_destinations.post_id INNER JOIN workspaces ON workspaces.id = posts.workspace_id WHERE social_connections.id = publish_destinations.connection_id AND social_connections.status = 'connected' AND workspaces.status = 'active')"
-    ).bind(attemptNumber, now, row.destination.id, row.destination.attemptNumber),
-    context.env.DB.prepare(
-      "INSERT INTO publish_attempts (id, destination_id, attempt_number, workflow_instance_id, status, stage, started_at, updated_at) SELECT ?, ?, ?, ?, 'queued', 'reconcile_only', ?, ? FROM publish_destinations WHERE id = ? AND attempt_number = ? AND status = 'queued' AND stage = 'reconcile_only'"
-    ).bind(
-      crypto.randomUUID(),
-      row.destination.id,
-      attemptNumber,
-      workflowId,
-      now,
-      now,
-      row.destination.id,
-      attemptNumber
-    ),
-    context.env.DB.prepare(
-      "INSERT INTO outbox_events (id, event_type, aggregate_id, attempt_number, created_at) SELECT ?, 'publish_destination', ?, ?, ? FROM publish_destinations WHERE id = ? AND attempt_number = ? AND status = 'queued' AND stage = 'reconcile_only'"
-    ).bind(
-      workflowId,
-      row.destination.id,
-      attemptNumber,
-      now,
-      row.destination.id,
-      attemptNumber
-    )
-  ]);
-  if (results[0]?.meta.changes !== 1) {
-    throw new AppError(
-      409,
-      "reconciliation_conflict",
-      "The destination changed while reconciliation was being requested."
-    );
-  }
-  await writeAuditEvent(db, {
-    action: "destination.reconciliation_requested",
-    actorUserId: auth.userId,
-    entityId: row.destination.id,
-    entityType: "publish_destination",
-    metadata: { attemptNumber },
-    workspaceId: auth.workspaceId
-  });
-  context.executionCtx.waitUntil(dispatchOutbox(context.env));
-  await recomputePostStatus(context.env, row.destination.postId);
-  return context.json(
-    { post: await buildPost(db, row.destination.postId, auth.workspaceId) },
+    },
     202
   );
 });
+
+const abandonableStatuses = [
+  "blocked",
+  "failed_permanent",
+  "unavailable",
+  "awaiting_user_action"
+] as const;
+
+const trustedProviderUrl = (
+  platform: "facebook" | "instagram" | "youtube" | "tiktok",
+  value: string
+): boolean => {
+  const hostname = new URL(value).hostname.toLowerCase();
+  const allowedHosts: Record<typeof platform, readonly string[]> = {
+    facebook: ["facebook.com", "fb.watch"],
+    instagram: ["instagram.com"],
+    tiktok: ["tiktok.com"],
+    youtube: ["youtube.com", "youtu.be"]
+  };
+  return allowedHosts[platform].some(
+    allowed => hostname === allowed || hostname.endsWith("." + allowed)
+  );
+};
+
+postRoutes.post(
+  "/:postId/destinations/:destinationId/abandon",
+  async context => {
+    await parseJson(context, abandonDestinationSchema);
+    const auth = context.get("auth");
+    const db = createDb(context.env.DB);
+    const [row] = await db
+      .select({ destination: publishDestinations })
+      .from(publishDestinations)
+      .innerJoin(posts, eq(posts.id, publishDestinations.postId))
+      .where(
+        and(
+          eq(publishDestinations.id, context.req.param("destinationId")),
+          eq(publishDestinations.postId, context.req.param("postId")),
+          eq(posts.workspaceId, auth.workspaceId)
+        )
+      )
+      .limit(1);
+    if (
+      row === undefined ||
+      !abandonableStatuses.includes(
+        row.destination.status as (typeof abandonableStatuses)[number]
+      ) ||
+      row.destination.outcomeUnknown
+    ) {
+      throw new AppError(
+        409,
+        "destination_not_abandonable",
+        "Resolve uncertain provider outcomes before abandoning this destination."
+      );
+    }
+    if (
+      row.destination.remotePostId !== null ||
+      row.destination.remoteUrl !== null
+    ) {
+      throw new AppError(
+        409,
+        "destination_has_published_evidence",
+        "A destination with published provider evidence cannot be abandoned."
+      );
+    }
+
+    const now = Date.now();
+    const transitionToken = crypto.randomUUID();
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(
+        "UPDATE publish_destinations SET status = 'cancelled', stage = 'customer_abandoned', next_poll_at = NULL, last_error_code = NULL, last_error_message = NULL, outcome_unknown = 0, transition_token = ?, updated_at = ? WHERE id = ? AND attempt_number = ? AND status = ? AND outcome_unknown = 0 AND remote_post_id IS NULL AND remote_url IS NULL"
+      ).bind(
+        transitionToken,
+        now,
+        row.destination.id,
+        row.destination.attemptNumber,
+        row.destination.status
+      ),
+      context.env.DB.prepare(
+        "UPDATE publish_attempts SET status = 'cancelled', stage = 'customer_abandoned', finished_at = COALESCE(finished_at, ?), updated_at = ? WHERE destination_id = ? AND attempt_number = ? AND EXISTS (SELECT 1 FROM publish_destinations WHERE id = ? AND transition_token = ?)"
+      ).bind(
+        now,
+        now,
+        row.destination.id,
+        row.destination.attemptNumber,
+        row.destination.id,
+        transitionToken
+      )
+    ]);
+    if (results[0]?.meta.changes !== 1) {
+      throw new AppError(
+        409,
+        "destination_abandon_conflict",
+        "The destination changed while it was being abandoned."
+      );
+    }
+    await recomputePostStatus(context.env, row.destination.postId);
+    await writeAuditEvent(db, {
+      action: "destination.abandoned",
+      actorUserId: auth.userId,
+      entityId: row.destination.id,
+      entityType: "publish_destination",
+      metadata: { previousStatus: row.destination.status },
+      workspaceId: auth.workspaceId
+    });
+    return context.json({
+      post: await buildPost(
+        db,
+        context.env.DB,
+        row.destination.postId,
+        auth.workspaceId
+      )
+    });
+  }
+);
+
+postRoutes.post(
+  "/:postId/destinations/:destinationId/reconcile",
+  async context => {
+    await parseJson(context, reconcileDestinationSchema);
+    const auth = context.get("auth");
+    const db = createDb(context.env.DB);
+    const [row] = await db
+      .select({ destination: publishDestinations })
+      .from(publishDestinations)
+      .innerJoin(posts, eq(posts.id, publishDestinations.postId))
+      .where(
+        and(
+          eq(publishDestinations.id, context.req.param("destinationId")),
+          eq(publishDestinations.postId, context.req.param("postId")),
+          eq(posts.workspaceId, auth.workspaceId)
+        )
+      )
+      .limit(1);
+    if (row?.destination.status !== "reconciliation_required") {
+      throw new AppError(
+        409,
+        "reconciliation_unavailable",
+        "This destination is not awaiting reconciliation."
+      );
+    }
+    if (
+      (row.destination.remoteSessionId === null &&
+        row.destination.remotePostId === null) ||
+      (row.destination.platform === "instagram" &&
+        row.destination.remotePostId === null)
+    ) {
+      throw new AppError(
+        409,
+        "manual_provider_check_required",
+        "No provider identifier is available for safe automatic reconciliation. Check the provider account before requesting a retry."
+      );
+    }
+
+    const attemptNumber = row.destination.attemptNumber + 1;
+    const workflowId = workflowInstanceId(row.destination.id, attemptNumber);
+    const now = Date.now();
+    const results = await context.env.DB.batch([
+      context.env.DB.prepare(
+        "UPDATE publish_destinations SET status = 'queued', stage = 'reconcile_only', attempt_number = ?, workflow_instance_id = NULL, next_poll_at = NULL, last_error_code = NULL, last_error_message = NULL, updated_at = ? WHERE id = ? AND attempt_number = ? AND status = 'reconciliation_required' AND EXISTS (SELECT 1 FROM social_connections INNER JOIN posts ON posts.id = publish_destinations.post_id INNER JOIN workspaces ON workspaces.id = posts.workspace_id WHERE social_connections.id = publish_destinations.connection_id AND social_connections.status = 'connected' AND workspaces.status = 'active')"
+      ).bind(
+        attemptNumber,
+        now,
+        row.destination.id,
+        row.destination.attemptNumber
+      ),
+      context.env.DB.prepare(
+        "INSERT INTO publish_attempts (id, destination_id, attempt_number, workflow_instance_id, status, stage, started_at, updated_at) SELECT ?, ?, ?, ?, 'queued', 'reconcile_only', ?, ? FROM publish_destinations WHERE id = ? AND attempt_number = ? AND status = 'queued' AND stage = 'reconcile_only'"
+      ).bind(
+        crypto.randomUUID(),
+        row.destination.id,
+        attemptNumber,
+        workflowId,
+        now,
+        now,
+        row.destination.id,
+        attemptNumber
+      ),
+      context.env.DB.prepare(
+        "INSERT INTO outbox_events (id, event_type, aggregate_id, attempt_number, created_at) SELECT ?, 'publish_destination', ?, ?, ? FROM publish_destinations WHERE id = ? AND attempt_number = ? AND status = 'queued' AND stage = 'reconcile_only'"
+      ).bind(
+        workflowId,
+        row.destination.id,
+        attemptNumber,
+        now,
+        row.destination.id,
+        attemptNumber
+      )
+    ]);
+    if (results[0]?.meta.changes !== 1) {
+      throw new AppError(
+        409,
+        "reconciliation_conflict",
+        "The destination changed while reconciliation was being requested."
+      );
+    }
+    await writeAuditEvent(db, {
+      action: "destination.reconciliation_requested",
+      actorUserId: auth.userId,
+      entityId: row.destination.id,
+      entityType: "publish_destination",
+      metadata: { attemptNumber },
+      workspaceId: auth.workspaceId
+    });
+    context.executionCtx.waitUntil(dispatchOutbox(context.env));
+    await recomputePostStatus(context.env, row.destination.postId);
+    return context.json(
+      {
+        post: await buildPost(
+          db,
+          context.env.DB,
+          row.destination.postId,
+          auth.workspaceId
+        )
+      },
+      202
+    );
+  }
+);
+
+postRoutes.post(
+  "/:postId/destinations/:destinationId/resolve",
+  async context => {
+    const input = await parseJson(context, resolveDestinationSchema);
+    const auth = context.get("auth");
+    const db = createDb(context.env.DB);
+    const [row] = await db
+      .select({ destination: publishDestinations })
+      .from(publishDestinations)
+      .innerJoin(posts, eq(posts.id, publishDestinations.postId))
+      .where(
+        and(
+          eq(publishDestinations.id, context.req.param("destinationId")),
+          eq(publishDestinations.postId, context.req.param("postId")),
+          eq(posts.workspaceId, auth.workspaceId)
+        )
+      )
+      .limit(1);
+    if (row?.destination.status !== "reconciliation_required") {
+      throw new AppError(
+        409,
+        "manual_resolution_unavailable",
+        "This destination is not awaiting manual resolution."
+      );
+    }
+    if (
+      input.outcome === "published" &&
+      input.providerUrl !== undefined &&
+      !trustedProviderUrl(row.destination.platform, input.providerUrl)
+    ) {
+      throw new AppError(
+        422,
+        "invalid_provider_url",
+        "The published URL must use an official provider domain for this destination."
+      );
+    }
+    const automaticReconciliationAvailable =
+      row.destination.platform === "instagram"
+        ? row.destination.remotePostId !== null
+        : row.destination.platform === "facebook"
+          ? row.destination.remoteSessionId !== null
+          : row.destination.platform === "youtube"
+            ? row.destination.remotePostId !== null ||
+              row.destination.remoteUploadUrlEncrypted !== null
+            : row.destination.remoteSessionId !== null ||
+              row.destination.remotePostId !== null;
+    if (automaticReconciliationAvailable) {
+      throw new AppError(
+        409,
+        "automatic_reconciliation_available",
+        "Use automatic reconciliation while a provider identifier is available."
+      );
+    }
+
+    if (input.outcome === "published") {
+      const finished = await finishDestination(context.env, {
+        attemptNumber: row.destination.attemptNumber,
+        destinationId: row.destination.id,
+        providerPostId: input.providerPostId,
+        providerUrl: input.providerUrl,
+        stage: "manually_confirmed_published",
+        status: "published"
+      });
+      if (!finished) {
+        throw new AppError(
+          409,
+          "manual_resolution_conflict",
+          "The destination changed while it was being resolved."
+        );
+      }
+    } else {
+      const now = Date.now();
+      const transitionToken = crypto.randomUUID();
+      const results = await context.env.DB.batch([
+        context.env.DB.prepare(
+          "UPDATE publish_destinations SET status = 'failed_permanent', stage = 'manually_confirmed_not_published', remote_session_id = NULL, remote_upload_url_encrypted = NULL, remote_post_id = NULL, remote_url = NULL, upload_offset = 0, outcome_unknown = 0, last_error_code = 'manual_absence_confirmed', last_error_message = 'The provider account was checked and no published post was found. Retry is now available.', transition_token = ?, updated_at = ? WHERE id = ? AND attempt_number = ? AND status = 'reconciliation_required'"
+        ).bind(
+          transitionToken,
+          now,
+          row.destination.id,
+          row.destination.attemptNumber
+        ),
+        context.env.DB.prepare(
+          "UPDATE publish_attempts SET status = 'failed_permanent', stage = 'manually_confirmed_not_published', error_code = 'manual_absence_confirmed', error_message = 'The provider account was checked and no published post was found.', finished_at = ?, updated_at = ? WHERE destination_id = ? AND attempt_number = ? AND EXISTS (SELECT 1 FROM publish_destinations WHERE id = ? AND transition_token = ?)"
+        ).bind(
+          now,
+          now,
+          row.destination.id,
+          row.destination.attemptNumber,
+          row.destination.id,
+          transitionToken
+        )
+      ]);
+      if (results[0]?.meta.changes !== 1 || results[1]?.meta.changes !== 1) {
+        throw new AppError(
+          409,
+          "manual_resolution_conflict",
+          "The destination changed while it was being resolved."
+        );
+      }
+      await recomputePostStatus(context.env, row.destination.postId);
+    }
+
+    await writeAuditEvent(db, {
+      action: "destination.manually_resolved",
+      actorUserId: auth.userId,
+      entityId: row.destination.id,
+      entityType: "publish_destination",
+      metadata: {
+        outcome: input.outcome,
+        providerPostId:
+          input.outcome === "published" ? input.providerPostId : undefined
+      },
+      workspaceId: auth.workspaceId
+    });
+    return context.json({
+      post: await buildPost(
+        db,
+        context.env.DB,
+        row.destination.postId,
+        auth.workspaceId
+      )
+    });
+  }
+);

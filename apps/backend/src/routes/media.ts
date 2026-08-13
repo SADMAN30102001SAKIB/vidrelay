@@ -5,7 +5,10 @@ import type { AppEnv } from "../env";
 import { createDb } from "../db/client";
 import { mediaLeases, uploads } from "../db/schema";
 import { AppError } from "../lib/errors";
-import { createMediaLease, verifyMediaLeaseSignature } from "../lib/media-leases";
+import {
+  createMediaLease,
+  verifyMediaLeaseSignature
+} from "../lib/media-leases";
 import { requireAuth } from "../middleware/auth";
 
 const parseRange = (
@@ -58,12 +61,20 @@ mediaRoutes.on(["GET", "HEAD"], "/provider/:token/video.mp4", async context => {
   const token = context.req.param("token");
   const separator = token.lastIndexOf(".");
   if (separator < 1) {
-    throw new AppError(404, "media_not_found", "The media lease was not found.");
+    throw new AppError(
+      404,
+      "media_not_found",
+      "The media lease was not found."
+    );
   }
   const id = token.slice(0, separator);
   const signature = token.slice(separator + 1);
   if (!(await verifyMediaLeaseSignature(context.env, id, signature))) {
-    throw new AppError(404, "media_not_found", "The media lease was not found.");
+    throw new AppError(
+      404,
+      "media_not_found",
+      "The media lease was not found."
+    );
   }
 
   const [row] = await createDb(context.env.DB)
@@ -84,12 +95,20 @@ mediaRoutes.on(["GET", "HEAD"], "/provider/:token/video.mp4", async context => {
     )
     .limit(1);
   if (row?.status !== "ready") {
-    throw new AppError(404, "media_not_found", "The media lease was not found.");
+    throw new AppError(
+      404,
+      "media_not_found",
+      "The media lease was not found."
+    );
   }
 
   const metadata = await context.env.MEDIA.head(row.r2Key);
   if (metadata === null) {
-    throw new AppError(404, "media_not_found", "The media object was not found.");
+    throw new AppError(
+      404,
+      "media_not_found",
+      "The media object was not found."
+    );
   }
   const headers = new Headers({
     "Accept-Ranges": "bytes",
@@ -105,7 +124,11 @@ mediaRoutes.on(["GET", "HEAD"], "/provider/:token/video.mp4", async context => {
     }
     const object = await context.env.MEDIA.get(row.r2Key);
     if (object === null) {
-      throw new AppError(404, "media_not_found", "The media object was not found.");
+      throw new AppError(
+        404,
+        "media_not_found",
+        "The media object was not found."
+      );
     }
     return new Response(object.body, { headers, status: 200 });
   }
@@ -117,7 +140,12 @@ mediaRoutes.on(["GET", "HEAD"], "/provider/:token/video.mp4", async context => {
   }
   headers.set(
     "Content-Range",
-    "bytes " + String(range.start) + "-" + String(range.end) + "/" + String(metadata.size)
+    "bytes " +
+      String(range.start) +
+      "-" +
+      String(range.end) +
+      "/" +
+      String(metadata.size)
   );
   headers.set("Content-Length", String(range.length));
   if (context.req.method === "HEAD") {
@@ -127,7 +155,11 @@ mediaRoutes.on(["GET", "HEAD"], "/provider/:token/video.mp4", async context => {
     range: { length: range.length, offset: range.start }
   });
   if (object === null) {
-    throw new AppError(404, "media_not_found", "The media object was not found.");
+    throw new AppError(
+      404,
+      "media_not_found",
+      "The media object was not found."
+    );
   }
   return new Response(object.body, { headers, status: 206 });
 });
@@ -150,7 +182,11 @@ previewRoutes.post("/:id/preview-lease", async context => {
     )
     .limit(1);
   if (upload === undefined) {
-    throw new AppError(404, "upload_not_found", "A ready upload was not found.");
+    throw new AppError(
+      404,
+      "upload_not_found",
+      "A ready upload was not found."
+    );
   }
 
   return context.json({

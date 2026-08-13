@@ -1,6 +1,8 @@
 import { ProviderError } from "../lib/errors";
 
-const providerErrorDetails = (body: unknown): { code: string; message: string } => {
+const providerErrorDetails = (
+  body: unknown
+): { code: string; message: string } => {
   if (body !== null && typeof body === "object") {
     const record = body as Record<string, unknown>;
     const error = record.error;
@@ -28,7 +30,10 @@ const providerErrorDetails = (body: unknown): { code: string; message: string } 
     }
   }
 
-  return { code: "provider_error", message: "The provider rejected the request." };
+  return {
+    code: "provider_error",
+    message: "The provider rejected the request."
+  };
 };
 
 export const providerJson = async <T>(
@@ -64,7 +69,9 @@ export const providerJson = async <T>(
   if (!response.ok) {
     const details = providerErrorDetails(body);
     const authorizationInvalid =
-      response.status === 401 || details.code === "102" || details.code === "190";
+      response.status === 401 ||
+      details.code === "102" ||
+      details.code === "190";
     const retryAfter = Number(response.headers.get("Retry-After"));
     throw new ProviderError({
       code: authorizationInvalid ? "reauth_required" : details.code,
@@ -78,7 +85,8 @@ export const providerJson = async <T>(
       retryAfterSeconds:
         Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter : undefined,
       retryable:
-        !authorizationInvalid && (response.status === 429 || response.status >= 500)
+        !authorizationInvalid &&
+        (response.status === 429 || response.status >= 500)
     });
   }
 

@@ -1,16 +1,18 @@
 import {
   changePasswordSchema,
   loginSchema,
+  provisionCustomerSchema,
   registerSchema,
   updateProfileSchema,
   type User
 } from "@vidrelay/shared";
-import { and, eq, like, ne } from "drizzle-orm";
+import { and, eq, like, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 
 import type { AppEnv, AuthContext } from "../env";
 import { createDb, type Database } from "../db/client";
 import {
+  auditEvents,
   authAttempts,
   memberships,
   sessions,
@@ -20,6 +22,7 @@ import {
 import { writeAuditEvent } from "../lib/audit";
 import { createSessionCookie, deleteSessionCookie } from "../lib/cookies";
 import {
+  constantTimeEqual,
   hashPassword,
   hmacBase64Url,
   randomToken,
@@ -53,7 +56,9 @@ const slugify = (name: string): string => {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 48);
-  return (base.length > 0 ? base : "workspace") + "-" + randomToken(5).toLowerCase();
+  return (
+    (base.length > 0 ? base : "workspace") + "-" + randomToken(5).toLowerCase()
+  );
 };
 
 const clientAddress = (request: Request): string =>
@@ -107,7 +112,10 @@ const consumeAttempt = async (
   }
 };
 
-const clearFailedAttempts = async (db: Database, key: string): Promise<void> => {
+const clearFailedAttempts = async (
+  db: Database,
+  key: string
+): Promise<void> => {
   await db.delete(authAttempts).where(eq(authAttempts.key, key));
 };
 
@@ -146,7 +154,11 @@ const createSession = async (
   return { expiresAt, token };
 };
 
-const loadUser = async (db: Database, userId: string, workspaceId?: string): Promise<User> => {
+const loadUser = async (
+  db: Database,
+  userId: string,
+  workspaceId?: string
+): Promise<User> => {
   const rows = await db
     .select({
       createdAt: users.createdAt,
@@ -170,7 +182,11 @@ const loadUser = async (db: Database, userId: string, workspaceId?: string): Pro
   const row = rows[0];
 
   if (row === undefined) {
-    throw new AppError(404, "user_not_found", "The account could not be found.");
+    throw new AppError(
+      404,
+      "user_not_found",
+      "The account could not be found."
+    );
   }
 
   return {
@@ -192,18 +208,107 @@ const auth = (context: { get: (key: "auth") => AuthContext }): AuthContext =>
 
 export const authRoutes = new Hono<AppEnv>();
 
+const createCustomerAccount = async (
+  database: D1Database,
+  input: {
+    email: string;
+    name: string;
+    password: string;
+    timezone: string;
+    workspaceName: string;
+  },
+  audit?: {
+    actorUserId: string;
+    workspaceId: string;
+  }
+): Promise<{ userId: string; workspaceId: string }> => {
+  const email = normalizeEmail(input.email);
+  const now = Date.now();
+  const userId = crypto.randomUUID();
+  const workspaceId = crypto.randomUUID();
+  const passwordHash = await hashPassword(input.password);
+  const db = createDb(database);
+  await db.batch([
+    db.insert(users).values({
+      createdAt: now,
+      email,
+      id: userId,
+      name: input.name,
+      passwordHash,
+      role: "customer",
+      status: "active",
+      updatedAt: now
+    }),
+    db.insert(workspaces).values({
+      createdAt: now,
+      id: workspaceId,
+      name: input.workspaceName,
+      slug: slugify(input.workspaceName),
+      status: "active",
+      timezone: input.timezone,
+      updatedAt: now
+    }),
+    db.insert(memberships).values({
+      createdAt: now,
+      role: "owner",
+      userId,
+      workspaceId
+    }),
+    db.insert(auditEvents).values({
+      action: audit === undefined ? "account.registered" : "account.provisioned",
+      actorUserId: audit?.actorUserId ?? userId,
+      entityId: userId,
+      entityType: "user",
+      id: crypto.randomUUID(),
+      metadataJson: JSON.stringify(
+        audit === undefined ? {} : { workspaceId }
+      ),
+      workspaceId: audit?.workspaceId ?? workspaceId
+    })
+  ]);
+  return { userId, workspaceId };
+};
+
 authRoutes.post("/register", async context => {
-  if (context.env.ALLOW_SIGNUPS !== "true") {
-    throw new AppError(403, "signups_disabled", "New account registration is disabled.");
+  const bootstrapToken = context.req.header("X-VidRelay-Bootstrap");
+  const configuredBootstrapToken = context.env.BOOTSTRAP_SIGNUP_TOKEN;
+  const bootstrapRequested = bootstrapToken !== undefined;
+  const bootstrapAuthorized =
+    bootstrapRequested &&
+    configuredBootstrapToken !== undefined &&
+    configuredBootstrapToken.length >= 32 &&
+    constantTimeEqual(bootstrapToken, configuredBootstrapToken);
+  if (context.env.ALLOW_SIGNUPS !== "true" && !bootstrapAuthorized) {
+    throw new AppError(
+      403,
+      "signups_disabled",
+      "New account registration is disabled."
+    );
   }
 
   const input = await parseJson(context, registerSchema);
   if (!validTimezone(input.timezone)) {
-    throw new AppError(422, "invalid_timezone", "Choose a valid IANA time zone.");
+    throw new AppError(
+      422,
+      "invalid_timezone",
+      "Choose a valid IANA time zone."
+    );
   }
 
   const email = normalizeEmail(input.email);
   const db = createDb(context.env.DB);
+  if (bootstrapAuthorized) {
+    const [accountCount] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(users);
+    if (accountCount?.count !== 0) {
+      throw new AppError(
+        409,
+        "bootstrap_already_completed",
+        "The initial owner account has already been created."
+      );
+    }
+  }
   const key = await rateLimitKey(
     "register",
     email,
@@ -225,44 +330,87 @@ authRoutes.post("/register", async context => {
     .where(eq(users.email, email))
     .limit(1);
   if (existing !== undefined) {
-    throw new AppError(409, "account_exists", "An account already exists for this email.");
+    throw new AppError(
+      409,
+      "account_exists",
+      "An account already exists for this email."
+    );
   }
 
   const now = Date.now();
-  const userId = crypto.randomUUID();
-  const workspaceId = crypto.randomUUID();
+  let userId = crypto.randomUUID();
+  let workspaceId = crypto.randomUUID();
   const passwordHash = await hashPassword(input.password);
 
   try {
-    await db.batch([
-      db.insert(users).values({
-        createdAt: now,
-        email,
-        id: userId,
-        name: input.name,
-        passwordHash,
-        role: "customer",
-        status: "active",
-        updatedAt: now
-      }),
-      db.insert(workspaces).values({
-        createdAt: now,
-        id: workspaceId,
-        name: input.workspaceName,
-        slug: slugify(input.workspaceName),
-        status: "active",
-        timezone: input.timezone,
-        updatedAt: now
-      }),
-      db.insert(memberships).values({
-        createdAt: now,
-        role: "owner",
-        userId,
-        workspaceId
-      })
-    ]);
-  } catch {
-    throw new AppError(409, "account_exists", "An account already exists for this email.");
+    if (bootstrapAuthorized) {
+      const results = await context.env.DB.batch([
+        context.env.DB.prepare(
+          "INSERT INTO users (id, email, name, password_hash, role, status, created_at, updated_at) SELECT ?, ?, ?, ?, 'operator', 'active', ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)"
+        ).bind(userId, email, input.name, passwordHash, now, now),
+        context.env.DB.prepare(
+          "INSERT INTO workspaces (id, name, slug, timezone, status, created_at, updated_at) SELECT ?, ?, ?, ?, 'active', ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE id = ?)"
+        ).bind(
+          workspaceId,
+          input.workspaceName,
+          slugify(input.workspaceName),
+          input.timezone,
+          now,
+          now,
+          userId
+        ),
+        context.env.DB.prepare(
+          "INSERT INTO memberships (user_id, workspace_id, role, created_at) SELECT ?, ?, 'owner', ? WHERE EXISTS (SELECT 1 FROM users WHERE id = ?) AND EXISTS (SELECT 1 FROM workspaces WHERE id = ?)"
+        ).bind(userId, workspaceId, now, userId, workspaceId),
+        context.env.DB.prepare(
+          "INSERT INTO audit_events (id, actor_user_id, workspace_id, action, entity_type, entity_id, metadata_json, created_at) SELECT ?, ?, ?, 'account.registered', 'user', ?, '{}', ? WHERE EXISTS (SELECT 1 FROM memberships WHERE user_id = ? AND workspace_id = ?)"
+        ).bind(
+          crypto.randomUUID(),
+          userId,
+          workspaceId,
+          userId,
+          now,
+          userId,
+          workspaceId
+        )
+      ]);
+      if (
+        results[0]?.meta.changes !== 1 ||
+        results[1]?.meta.changes !== 1 ||
+        results[2]?.meta.changes !== 1 ||
+        results[3]?.meta.changes !== 1
+      ) {
+        throw new Error("The initial owner was created concurrently.");
+      }
+    } else {
+      const created = await createCustomerAccount(context.env.DB, input);
+      userId = created.userId;
+      workspaceId = created.workspaceId;
+    }
+  } catch (error) {
+    if (
+      bootstrapAuthorized &&
+      error instanceof Error &&
+      error.message === "The initial owner was created concurrently."
+    ) {
+      throw new AppError(
+        409,
+        "bootstrap_already_completed",
+        "The initial owner account has already been created."
+      );
+    }
+    if (
+      error instanceof Error &&
+      (error.message.includes("UNIQUE constraint failed: users.email") ||
+        error.message.includes("UNIQUE constraint failed: workspaces.slug"))
+    ) {
+      throw new AppError(
+        409,
+        "account_exists",
+        "An account already exists for this email or workspace name."
+      );
+    }
+    throw error;
   }
 
   const session = await createSession(
@@ -272,19 +420,55 @@ authRoutes.post("/register", async context => {
     context.env.AUDIT_HASH_SECRET
   );
   await clearFailedAttempts(db, key);
-  await writeAuditEvent(db, {
-    action: "account.registered",
-    actorUserId: userId,
-    entityId: userId,
-    entityType: "user",
-    workspaceId
-  });
 
   context.header(
     "Set-Cookie",
     createSessionCookie(session.token, context.env, sessionLifetimeSeconds)
   );
   return context.json({ user: await loadUser(db, userId, workspaceId) }, 201);
+});
+
+authRoutes.post("/provision-customer", requireAuth, async context => {
+  const current = auth(context);
+  if (current.role !== "operator") {
+    throw new AppError(
+      403,
+      "operator_required",
+      "Operator access is required."
+    );
+  }
+  const input = await parseJson(context, provisionCustomerSchema);
+  if (!validTimezone(input.timezone)) {
+    throw new AppError(
+      422,
+      "invalid_timezone",
+      "Choose a valid IANA time zone."
+    );
+  }
+  const db = createDb(context.env.DB);
+  try {
+    const created = await createCustomerAccount(context.env.DB, input, {
+      actorUserId: current.userId,
+      workspaceId: current.workspaceId
+    });
+    return context.json(
+      { user: await loadUser(db, created.userId, created.workspaceId) },
+      201
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes("UNIQUE constraint failed: users.email") ||
+        error.message.includes("UNIQUE constraint failed: workspaces.slug"))
+    ) {
+      throw new AppError(
+        409,
+        "account_exists",
+        "An account already exists for this email or workspace name."
+      );
+    }
+    throw error;
+  }
 });
 
 authRoutes.post("/login", async context => {
@@ -303,7 +487,6 @@ authRoutes.post("/login", async context => {
     context.req.raw,
     context.env.AUDIT_HASH_SECRET
   );
-  await consumeAttempt(context.env.DB, ipKey, maximumIpAttempts);
   await consumeAttempt(context.env.DB, key, maximumAccountAttempts);
 
   const [row] = await db
@@ -323,7 +506,12 @@ authRoutes.post("/login", async context => {
   }
 
   if (!valid || row?.status !== "active") {
-    throw new AppError(401, "invalid_credentials", "The email or password is incorrect.");
+    await consumeAttempt(context.env.DB, ipKey, maximumIpAttempts);
+    throw new AppError(
+      401,
+      "invalid_credentials",
+      "The email or password is incorrect."
+    );
   }
 
   const session = await createSession(
@@ -333,7 +521,10 @@ authRoutes.post("/login", async context => {
     context.env.AUDIT_HASH_SECRET
   );
   const now = Date.now();
-  await db.update(users).set({ lastLoginAt: now, updatedAt: now }).where(eq(users.id, row.id));
+  await db
+    .update(users)
+    .set({ lastLoginAt: now, updatedAt: now })
+    .where(eq(users.id, row.id));
   await clearFailedAttempts(db, key);
   const user = await loadUser(db, row.id);
   await writeAuditEvent(db, {
@@ -353,14 +544,24 @@ authRoutes.post("/login", async context => {
 
 authRoutes.get("/me", requireAuth, async context => {
   const current = auth(context);
-  return context.json({ user: await loadUser(createDb(context.env.DB), current.userId, current.workspaceId) });
+  return context.json({
+    user: await loadUser(
+      createDb(context.env.DB),
+      current.userId,
+      current.workspaceId
+    )
+  });
 });
 
 authRoutes.patch("/profile", requireAuth, async context => {
   const current = auth(context);
   const input = await parseJson(context, updateProfileSchema);
   if (!validTimezone(input.timezone)) {
-    throw new AppError(422, "invalid_timezone", "Choose a valid IANA time zone.");
+    throw new AppError(
+      422,
+      "invalid_timezone",
+      "Choose a valid IANA time zone."
+    );
   }
   const db = createDb(context.env.DB);
   const now = Date.now();
@@ -371,7 +572,11 @@ authRoutes.patch("/profile", requireAuth, async context => {
       .where(eq(users.id, current.userId)),
     db
       .update(workspaces)
-      .set({ name: input.workspaceName, timezone: input.timezone, updatedAt: now })
+      .set({
+        name: input.workspaceName,
+        timezone: input.timezone,
+        updatedAt: now
+      })
       .where(eq(workspaces.id, current.workspaceId))
   ]);
   await writeAuditEvent(db, {
@@ -412,19 +617,34 @@ authRoutes.post("/password", requireAuth, async context => {
     .where(eq(users.id, current.userId))
     .limit(1);
 
-  if (row === undefined || !(await verifyPassword(input.currentPassword, row.passwordHash))) {
-    throw new AppError(401, "invalid_password", "The current password is incorrect.");
+  if (
+    row === undefined ||
+    !(await verifyPassword(input.currentPassword, row.passwordHash))
+  ) {
+    throw new AppError(
+      401,
+      "invalid_password",
+      "The current password is incorrect."
+    );
   }
 
   const now = Date.now();
   await db.batch([
     db
       .update(users)
-      .set({ passwordHash: await hashPassword(input.newPassword), updatedAt: now })
+      .set({
+        passwordHash: await hashPassword(input.newPassword),
+        updatedAt: now
+      })
       .where(eq(users.id, current.userId)),
     db
       .delete(sessions)
-      .where(and(eq(sessions.userId, current.userId), ne(sessions.id, current.sessionHash)))
+      .where(
+        and(
+          eq(sessions.userId, current.userId),
+          ne(sessions.id, current.sessionHash)
+        )
+      )
   ]);
   await writeAuditEvent(db, {
     action: "password.changed",
@@ -473,7 +693,9 @@ authRoutes.delete("/sessions/:id", requireAuth, async context => {
   const rows = await db
     .select({ id: sessions.id })
     .from(sessions)
-    .where(and(eq(sessions.userId, current.userId), like(sessions.id, prefix + "%")))
+    .where(
+      and(eq(sessions.userId, current.userId), like(sessions.id, prefix + "%"))
+    )
     .limit(2);
   if (rows.length !== 1 || rows[0] === undefined) {
     throw new AppError(404, "session_not_found", "The session was not found.");
