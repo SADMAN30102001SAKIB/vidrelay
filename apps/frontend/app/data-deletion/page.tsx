@@ -45,10 +45,10 @@ export default function DataDeletionPage() {
         <h2>What it does not do</h2>
         <p>
           Deleting VidRelay data does not delete videos already published to an
-          external provider. Delete those posts in Facebook, Instagram, YouTube,
-          or TikTok directly. Provider revocation can also fail when a provider
-          is unavailable; you can independently revoke VidRelay from the
-          provider’s security settings.
+          external provider. Delete those posts in Facebook, Instagram, or
+          YouTube directly. Provider revocation can also fail when a provider is
+          unavailable; you can independently revoke VidRelay from the provider’s
+          security settings.
         </p>
         <DataDeletionLookup />
       </div>

@@ -35,8 +35,9 @@ Cloudflare resources:
 ## Request and security model
 
 The browser authenticates with an HttpOnly session cookie. The raw session token
-is never stored in D1; only its hash is stored. Production cookies are `Secure`
-and cross-site, because Pages and the API normally have different origins.
+is never stored in D1; only its hash is stored. Production cookies are `Secure`.
+The app and API use different origins on sibling custom subdomains but remain
+same-site so browsers do not treat the session as a third-party cookie.
 
 The API accepts browser origins only from the exact comma-separated
 `APP_ORIGINS` allowlist. Authenticated browser mutations also require
@@ -60,8 +61,9 @@ accepted media profile, and whether signups are open.
    can request at most 25 part URLs at once; current parts are 16 MiB.
 4. Completion is idempotent. The API completes the R2 multipart upload, verifies
    the stored object size, and reads bounded MP4 metadata ranges from private R2.
-5. Invalid media is rejected. Valid media becomes `ready` and can be previewed
-   through a short-lived signed media lease.
+5. Media that fails the bounded structural/metadata preflight is rejected. Media
+   that passes becomes `ready` and can be previewed through a short-lived signed
+   media lease; provider decoding remains the final validation.
 6. A source can be removed after all referencing destinations are published or
    explicitly cancelled. R2 quota is released only after deletion is confirmed;
    post and attempt evidence remains in D1.

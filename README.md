@@ -1,24 +1,24 @@
 # VidRelay
 
-VidRelay is a Cloudflare-based SaaS control plane for uploading one verified vertical
+VidRelay is a Cloudflare-based SaaS control plane for uploading one preflighted vertical
 video and publishing it independently to supported social destinations. The
 implementation covers **Facebook Pages**, **Instagram Professional accounts**,
-**YouTube channels**, and **TikTok creators**. Each provider remains unavailable
+and **YouTube channels** in the first release. Each provider remains unavailable
 or restricted until its credentials, review state, and capability mode permit it.
+TikTok support is intentionally excluded from the first-release product surface.
 
 This repository is pre-release software. Provider credentials, provider approval,
-successful verification, and an operator-approved release are all separate gates.
+successful release checks, and an operator-approved release are all separate gates.
 VidRelay does not bypass platform policy, make personal profiles publishable, or
 guarantee that every provider will accept or immediately publish a video.
 
 ## Product truth
 
-| Destination | Eligible account                                                | Safe v1 promise                                                                                                                           |
-| ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Facebook    | A Page for which the connecting user has the required Page task | Development/test access until Meta grants the required production access; direct Page Reel publishing only when the capability is enabled |
-| Instagram   | A Professional account supported by Instagram Login             | Development/test access until Meta review is complete; no personal-account publishing                                                     |
-| YouTube     | A channel authorized with `youtube.upload`                      | Private uploads while the API project is restricted; broader visibility only after the required YouTube audit/approval                    |
-| TikTok      | A creator returned as eligible by the Content Posting API       | Keep unavailable until Content Posting approval; unaudited testing is private-only and still subject to current creator capabilities      |
+| Destination | Eligible account                                                         | Safe v1 promise                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Facebook    | A Page for which the connecting user has the required Page task          | Development/test access until Meta grants the required production access; direct Page Reel publishing only when the capability is enabled |
+| Instagram   | A Professional account supported by Instagram Login                      | Development/test access until Meta review is complete; no personal-account publishing                                                     |
+| YouTube     | A channel authorizing `openid`, `youtube.upload`, and `youtube.readonly` | Private uploads while the API project is restricted; broader visibility only after the required YouTube audit/approval                    |
 
 The API exposes the effective deployment truth at `GET /api/config`. The frontend
 must render those capability modes rather than hard-code availability.
@@ -41,7 +41,7 @@ See:
 
 ## Local quick start
 
-Requirements are Node.js 24 (see `.node-version`) and pnpm 11.20.0.
+Requirements are Node.js 24 (see `.node-version`) and pnpm 11.22.0.
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -75,23 +75,30 @@ subrequest allowance; this is a mandatory release gate, not an optimization.
 
 ## Root commands
 
-| Command                       | Purpose                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| `pnpm dev`                    | Run frontend and backend development servers                                             |
-| `pnpm types:generate`         | Regenerate Wrangler binding types after configuration changes                            |
-| `pnpm generate`               | Generate a Drizzle migration from schema changes                                         |
-| `pnpm migrate:local`          | Apply D1 migrations to local Wrangler state                                              |
-| `pnpm migrations:list:remote` | List pending migrations for the production config without applying them                  |
-| `pnpm migrate:remote`         | Apply D1 migrations to the production D1 database; this is a remote write                |
-| `pnpm check`                  | Format check, lint, typecheck, tests, Fallow, and builds; requires `NEXT_PUBLIC_API_URL` |
-| `pnpm deploy:backend`         | Deploy the production API Worker and Workflow                                            |
-| `pnpm deploy:frontend`        | Build and upload the static frontend to the `vidrelay` Pages project                     |
+| Command                       | Purpose                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `pnpm dev`                    | Run frontend and backend development servers                                         |
+| `pnpm types:generate`         | Regenerate Wrangler binding types after configuration changes                        |
+| `pnpm generate`               | Generate a Drizzle migration from schema changes                                     |
+| `pnpm migrate:local`          | Apply D1 migrations to local Wrangler state                                          |
+| `pnpm migrations:rehearse`    | Rehearse fresh and populated upgrades in isolated local Wrangler state               |
+| `pnpm migrations:list:remote` | List pending migrations for the production config without applying them              |
+| `pnpm migrate:remote`         | Apply D1 migrations to the production D1 database; this is a remote write            |
+| `pnpm check`                  | Format, lint, types, migration rehearsal, tests, Fallow, and builds; set the API URL |
+| `pnpm deploy:backend`         | Deploy the production API Worker and Workflow                                        |
+| `pnpm deploy:frontend`        | Build and upload the static frontend to the `vidrelay` Pages project                 |
 
 `apps/backend/wrangler.jsonc` is local-only. Both production commands require an
 ignored `apps/backend/wrangler.production.jsonc` copied from the checked-in
 example and filled with the customer's exact origins and D1 database ID. Do not
 run either deployment or the remote migration from an unreviewed branch. Follow
 [the release runbook](docs/OPERATIONS.md#production-release) first.
+
+`pnpm fallow` rejects any dead-code finding, duplication above 5%, and any new
+complexity finding not present in the committed identity baseline. Run
+`pnpm exec fallow health` to inspect the inherited hotspot backlog. Regenerate
+`fallow-baselines/health.json` only after an intentional reviewed cleanup or a
+deliberate Fallow upgrade; never regenerate it automatically in CI.
 
 ## Media contract
 

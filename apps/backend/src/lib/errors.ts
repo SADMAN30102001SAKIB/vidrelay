@@ -22,7 +22,9 @@ export class AppError extends Error {
 export class ProviderError extends Error {
   readonly code: string;
   readonly outcomeUnknown: boolean;
+  readonly providerCode: string | null;
   readonly providerStatus: number | null;
+  readonly providerSubcode: string | null;
   readonly retryAfterSeconds: number | null;
   readonly retryable: boolean;
 
@@ -30,7 +32,9 @@ export class ProviderError extends Error {
     code: string;
     message: string;
     outcomeUnknown?: boolean | undefined;
+    providerCode?: string | undefined;
     providerStatus?: number | undefined;
+    providerSubcode?: string | undefined;
     retryAfterSeconds?: number | undefined;
     retryable?: boolean | undefined;
   }) {
@@ -38,7 +42,9 @@ export class ProviderError extends Error {
     this.name = "ProviderError";
     this.code = options.code;
     this.outcomeUnknown = options.outcomeUnknown ?? false;
+    this.providerCode = options.providerCode ?? null;
     this.providerStatus = options.providerStatus ?? null;
+    this.providerSubcode = options.providerSubcode ?? null;
     this.retryAfterSeconds = options.retryAfterSeconds ?? null;
     this.retryable = options.retryable ?? false;
   }

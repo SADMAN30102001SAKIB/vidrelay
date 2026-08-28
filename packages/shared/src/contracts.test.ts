@@ -4,6 +4,8 @@ import {
   abandonDestinationSchema,
   apiErrorSchema,
   createPostSchema,
+  deletionStatusLookupSchema,
+  retryDeletionSchema,
   provisionCustomerSchema,
   resolveDestinationSchema,
   tiktokSettingsSchema,
@@ -20,6 +22,31 @@ describe("shared contracts", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it("keeps deletion references in request bodies", () => {
+    expect(
+      deletionStatusLookupSchema.safeParse({ reference: "x".repeat(32) })
+        .success
+    ).toBe(true);
+    expect(
+      deletionStatusLookupSchema.safeParse({ reference: "too-short" }).success
+    ).toBe(false);
+  });
+
+  it("requires an explicit outcome for ambiguous provider revocation", () => {
+    expect(
+      retryDeletionSchema.safeParse({
+        acknowledgement: "retry_deletion",
+        providerRevocationResolution: "confirmed_revoked"
+      }).success
+    ).toBe(true);
+    expect(
+      retryDeletionSchema.safeParse({
+        acknowledgement: "retry_deletion",
+        providerRevocationResolution: "assume_success"
+      }).success
+    ).toBe(false);
   });
 
   it("rejects videos beyond the common profile size", () => {

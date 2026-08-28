@@ -1,6 +1,11 @@
 "use client";
 
-import { createPostSchema, platformLabels, platforms } from "@vidrelay/shared";
+import {
+  createPostSchema,
+  firstReleasePlatforms,
+  platformLabels,
+  platforms
+} from "@vidrelay/shared";
 import { ChevronDown, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -107,21 +112,9 @@ export default function CreatePostPage() {
 
   useEffect(() => {
     const connectionId = selected.tiktok;
-    setCreatorInfo(null);
-    setCreatorError(null);
-    setTiktokPrivacy("");
-    setTiktokComments(false);
-    setTiktokDuet(false);
-    setTiktokStitch(false);
-    setTiktokCommercialContent(false);
-    setTiktokOwnBrand(false);
-    setTiktokBranded(false);
-    setTiktokConsent(false);
     if (connectionId === undefined) {
-      setCreatorLoading(false);
       return;
     }
-    setCreatorLoading(true);
     let cancelled = false;
     void apiRequest<{ creatorInfo: TikTokCreatorInfo }>(
       `/api/connections/${connectionId}/tiktok/creator-info`,
@@ -169,9 +162,26 @@ export default function CreatePostPage() {
   const capabilityFor = (platform: Platform): Capability | undefined =>
     config?.capabilities.find(capability => capability.platform === platform);
 
+  const resetTikTokCreatorState = (loadingCreator: boolean) => {
+    setCreatorInfo(null);
+    setCreatorError(null);
+    setCreatorLoading(loadingCreator);
+    setTiktokPrivacy("");
+    setTiktokComments(false);
+    setTiktokDuet(false);
+    setTiktokStitch(false);
+    setTiktokCommercialContent(false);
+    setTiktokOwnBrand(false);
+    setTiktokBranded(false);
+    setTiktokConsent(false);
+  };
+
   const togglePlatform = (platform: Platform) => {
     const current = selected[platform];
     if (current !== undefined) {
+      if (platform === "tiktok") {
+        resetTikTokCreatorState(false);
+      }
       setSelected(value => {
         const next = { ...value };
         delete next[platform];
@@ -181,11 +191,17 @@ export default function CreatePostPage() {
     }
     const first = connectedByPlatform[platform][0];
     if (first !== undefined) {
+      if (platform === "tiktok") {
+        resetTikTokCreatorState(true);
+      }
       setSelected(value => ({ ...value, [platform]: first.id }));
     }
   };
 
   const selectConnection = (platform: Platform, id: string) => {
+    if (platform === "tiktok" && id !== selected.tiktok) {
+      resetTikTokCreatorState(true);
+    }
     setSelected(current => ({ ...current, [platform]: id }));
   };
 
@@ -198,7 +214,7 @@ export default function CreatePostPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (upload === null) {
-      setError("Upload and verify a video before publishing.");
+      setError("Complete the upload and media preflight before publishing.");
       return;
     }
 
@@ -381,7 +397,7 @@ export default function CreatePostPage() {
     );
   }
 
-  const selectedPlatforms = platforms.filter(
+  const selectedPlatforms = firstReleasePlatforms.filter(
     platform => selected[platform] !== undefined
   );
   return (
@@ -400,8 +416,8 @@ export default function CreatePostPage() {
               <div>
                 <h2 id="media-heading">1. Upload media</h2>
                 <p>
-                  Browser checks run first; the backend is authoritative for
-                  codecs and integrity.
+                  Browser checks run first; the backend then performs a bounded
+                  MP4 structural, codec, and metadata preflight.
                 </p>
               </div>
             </div>
@@ -451,7 +467,7 @@ export default function CreatePostPage() {
               </p>
             </div>
             <div className="platform-selector">
-              {platforms.map(platform => {
+              {firstReleasePlatforms.map(platform => {
                 const capability = capabilityFor(platform);
                 const noConnection = connectedByPlatform[platform].length === 0;
                 const disabled =
@@ -969,9 +985,7 @@ export default function CreatePostPage() {
           <div className="summary-list">
             <div className="summary-row">
               <span>Media</span>
-              <strong>
-                {upload === null ? "Not verified" : upload.filename}
-              </strong>
+              <strong>{upload === null ? "Not ready" : upload.filename}</strong>
             </div>
             <div className="summary-row">
               <span>Destinations</span>

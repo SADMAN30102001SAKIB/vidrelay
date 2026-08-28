@@ -1,26 +1,15 @@
 import { apiErrorSchema } from "@vidrelay/shared";
 
-export const sessionExpiredEvent = "vidrelay:session-expired";
+import { resolveApiUrl } from "./api-origin";
 
-export const resolveApiUrl = (
-  configuredUrl: string | undefined,
-  environment: string | undefined
-): string => {
-  const value = configuredUrl?.trim();
-  if (value !== undefined && value.length > 0) {
-    return value.replace(/\/$/, "");
-  }
-  if (environment === "production") {
-    throw new Error(
-      "NEXT_PUBLIC_API_URL must be set before building or deploying the production frontend."
-    );
-  }
-  return "http://localhost:4000";
-};
+export { resolveApiUrl } from "./api-origin";
+
+export const sessionExpiredEvent = "vidrelay:session-expired";
 
 const API_URL = resolveApiUrl(
   process.env.NEXT_PUBLIC_API_URL,
-  process.env.NODE_ENV
+  process.env.NODE_ENV,
+  process.env.NEXT_PUBLIC_VIDRELAY_ALLOW_INSECURE_LOOPBACK === "true"
 );
 
 export const apiUrl = (path: string): string =>
@@ -66,11 +55,15 @@ export const apiRequest = async <T>(
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    if (response.status === 401 && typeof window !== "undefined") {
-      window.dispatchEvent(new Event(sessionExpiredEvent));
-    }
     const parsed = apiErrorSchema.safeParse(body);
     if (parsed.success) {
+      if (
+        response.status === 401 &&
+        parsed.data.error.code === "authentication_required" &&
+        typeof window !== "undefined"
+      ) {
+        window.dispatchEvent(new Event(sessionExpiredEvent));
+      }
       throw new ApiClientError(
         response.status,
         parsed.data.error.code,

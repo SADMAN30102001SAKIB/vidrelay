@@ -1,5 +1,6 @@
 "use client";
 
+import { firstReleasePlatforms, platformLabels } from "@vidrelay/shared";
 import { Cable, ListChecks, Send, UploadCloud } from "lucide-react";
 import Link from "next/link";
 
@@ -8,6 +9,8 @@ import type { LucideIcon } from "lucide-react";
 import { CapabilityOverview } from "@/components/CapabilityOverview";
 import { PublicShell } from "@/components/PublicChrome";
 import { PlatformMark, StatusBadge, buttonClass } from "@/components/ui";
+import { capabilityStatusView } from "@/lib/status";
+import type { StatusView } from "@/lib/status";
 import { useSession } from "@/providers/SessionProvider";
 
 const features: Array<{ copy: string; icon: LucideIcon; title: string }> = [
@@ -19,7 +22,7 @@ const features: Array<{ copy: string; icon: LucideIcon; title: string }> = [
   {
     copy: "Check size, duration, dimensions, and the server-inspected codecs before publishing.",
     icon: UploadCloud,
-    title: "Verify once"
+    title: "Preflight once"
   },
   {
     copy: "Set privacy, captions, audience, disclosure, and interaction controls explicitly.",
@@ -34,7 +37,7 @@ const features: Array<{ copy: string; icon: LucideIcon; title: string }> = [
 ];
 
 export default function HomePage() {
-  const { config } = useSession();
+  const { config, configError } = useSession();
   return (
     <PublicShell>
       <section className="hero">
@@ -47,9 +50,8 @@ export default function HomePage() {
             </span>
           </h1>
           <p className="hero-copy">
-            Upload one verified vertical MP4, choose your connected accounts,
-            and keep every platform’s required controls and delivery status in
-            one place.
+            Upload one vertical MP4, choose your connected accounts, and keep
+            every platform’s required controls and delivery status in one place.
           </p>
           <div className="button-row">
             {config?.signupsEnabled === true ? (
@@ -62,28 +64,34 @@ export default function HomePage() {
             </Link>
           </div>
         </div>
-        <div aria-label="Example publishing status" className="hero-panel">
+        <div
+          aria-label="First-release platform availability"
+          className="hero-panel">
           <div className="hero-panel-inner">
             <div className="mock-video">
               <UploadCloud aria-hidden="true" size={36} />
               <span>vertical-story.mp4</span>
-              <StatusBadge label="Verified" tone="success" />
+              <StatusBadge label="Preflight passed" tone="success" />
             </div>
             <div className="destination-stack">
-              {(["youtube", "facebook", "instagram", "tiktok"] as const).map(
-                (platform, index) => (
+              {firstReleasePlatforms.map(platform => {
+                const capability = config?.capabilities.find(
+                  item => item.platform === platform
+                );
+                const status: StatusView =
+                  capability !== undefined
+                    ? capabilityStatusView(capability.mode)
+                    : config === null && configError === null
+                      ? { label: "Checking", tone: "info" }
+                      : { label: "Unavailable", tone: "warning" };
+                return (
                   <div className="destination-row" key={platform}>
                     <PlatformMark platform={platform} />
-                    <span>
-                      {platform.charAt(0).toUpperCase() + platform.slice(1)}
-                    </span>
-                    <StatusBadge
-                      label={index < 3 ? "Published" : "Processing"}
-                      tone={index < 3 ? "success" : "info"}
-                    />
+                    <span>{platformLabels[platform]}</span>
+                    <StatusBadge {...status} />
                   </div>
-                )
-              )}
+                );
+              })}
             </div>
           </div>
         </div>

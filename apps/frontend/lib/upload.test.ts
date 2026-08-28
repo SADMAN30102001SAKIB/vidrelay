@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { putUploadPart } from "./upload";
+import { fileFingerprint, putUploadPart } from "./upload";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,5 +58,17 @@ describe("putUploadPart", () => {
 
     await expect(result).rejects.toMatchObject({ name: "AbortError" });
     expect(request.abort).toHaveBeenCalledOnce();
+  });
+});
+
+describe("fileFingerprint", () => {
+  it("distinguishes files that have identical browser metadata", async () => {
+    const options = { lastModified: 1_700_000_000_000, type: "video/mp4" };
+    const first = new File(["aaaa"], "clip.mp4", options);
+    const second = new File(["bbbb"], "clip.mp4", options);
+
+    await expect(fileFingerprint(first)).resolves.not.toBe(
+      await fileFingerprint(second)
+    );
   });
 });

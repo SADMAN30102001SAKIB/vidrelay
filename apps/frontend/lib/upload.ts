@@ -24,8 +24,30 @@ export interface PersistedUpload {
 
 const uploadStorageKey = "vidrelay.active-upload.v1";
 
-export const fileFingerprint = (file: File): string =>
-  [file.name, file.size, file.lastModified].join(":");
+export const fileFingerprint = async (file: File): Promise<string> => {
+  const sampleSize = 64 * 1024;
+  const middleStart = Math.max(
+    0,
+    Math.floor((file.size - Math.min(file.size, sampleSize)) / 2)
+  );
+  const tailStart = Math.max(0, file.size - sampleSize);
+  const metadata = new TextEncoder().encode(
+    [file.name, file.type, file.size, file.lastModified].join(":")
+  );
+  const sampled = await new Blob([
+    metadata,
+    file.slice(0, sampleSize),
+    file.slice(middleStart, middleStart + sampleSize),
+    file.slice(tailStart)
+  ]).arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", sampled);
+  return (
+    "sha256:" +
+    [...new Uint8Array(digest)]
+      .map(byte => byte.toString(16).padStart(2, "0"))
+      .join("")
+  );
+};
 
 export const readPersistedUpload = (): PersistedUpload | null => {
   try {

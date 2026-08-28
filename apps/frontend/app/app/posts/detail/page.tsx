@@ -215,85 +215,89 @@ function PostDetailContent() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [removingSource, setRemovingSource] = useState(false);
   const leaseUploadRef = useRef<string | null>(null);
+  const leaseRef = useRef<PreviewLease | null>(null);
+  const previewGenerationRef = useRef(0);
+  const loadGenerationRef = useRef(0);
 
   const loadPreview = useCallback(async (uploadId: string) => {
-    if (leaseUploadRef.current === uploadId) {
+    if (
+      leaseUploadRef.current === uploadId &&
+      leaseRef.current !== null &&
+      leaseRef.current.expiresAt > Date.now() + 60_000
+    ) {
       return;
     }
+    const generation = previewGenerationRef.current + 1;
+    previewGenerationRef.current = generation;
     leaseUploadRef.current = uploadId;
     try {
       const body = await apiRequest<{ lease: PreviewLease }>(
         `/api/uploads/${uploadId}/preview-lease`,
         { method: "POST" }
       );
-      setLease(body.lease);
+      if (previewGenerationRef.current === generation) {
+        leaseRef.current = body.lease;
+        setLease(body.lease);
+      }
     } catch {
-      leaseUploadRef.current = null;
+      if (previewGenerationRef.current === generation) {
+        leaseUploadRef.current = null;
+        leaseRef.current = null;
+        setLease(null);
+      }
     }
   }, []);
 
   const load = useCallback(async () => {
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
+    const isCurrent = (): boolean => loadGenerationRef.current === generation;
     await Promise.resolve();
     if (id === null || id.trim() === "") {
-      setError("No post ID was provided.");
-      setLoading(false);
+      if (isCurrent()) {
+        setError("No post ID was provided.");
+        setLoading(false);
+        setRefreshing(false);
+      }
       return;
     }
     try {
       const body = await apiRequest<PostDetailResponse>(
         `/api/posts/${encodeURIComponent(id)}`
       );
+      if (!isCurrent()) {
+        return;
+      }
       setDetail(body);
       setError(null);
       if (body.post.upload.status === "ready") {
         void loadPreview(body.post.upload.id);
       } else {
+        previewGenerationRef.current += 1;
         setLease(null);
+        leaseRef.current = null;
         leaseUploadRef.current = null;
       }
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (isCurrent()) {
+        setError(errorMessage(caught));
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isCurrent()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [id, loadPreview]);
 
   useEffect(() => {
-    let cancelled = false;
-    const request =
-      id === null || id.trim() === ""
-        ? Promise.reject(new Error("No post ID was provided."))
-        : apiRequest<PostDetailResponse>(
-            `/api/posts/${encodeURIComponent(id)}`
-          );
-    void request
-      .then(body => {
-        if (!cancelled) {
-          setDetail(body);
-          setError(null);
-          if (body.post.upload.status === "ready") {
-            void loadPreview(body.post.upload.id);
-          } else {
-            setLease(null);
-            leaseUploadRef.current = null;
-          }
-        }
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled) {
-          setError(errorMessage(caught));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+    const initialLoad = window.setTimeout(() => void load(), 0);
     return () => {
-      cancelled = true;
+      window.clearTimeout(initialLoad);
+      loadGenerationRef.current += 1;
+      previewGenerationRef.current += 1;
     };
-  }, [id, loadPreview]);
+  }, [load]);
 
   const active =
     detail?.post.destinations.some(destination =>
@@ -505,7 +509,7 @@ function PostDetailContent() {
         <section className="panel stack" aria-labelledby="media-detail-heading">
           <div className="panel-header">
             <div>
-              <h2 id="media-detail-heading">Verified media</h2>
+              <h2 id="media-detail-heading">Preflighted media</h2>
               <p>{post.upload.filename}</p>
             </div>
           </div>
@@ -529,6 +533,11 @@ function PostDetailContent() {
             <video
               className="video-preview"
               controls
+              onError={() => {
+                leaseUploadRef.current = null;
+                leaseRef.current = null;
+                setLease(null);
+              }}
               playsInline
               preload="metadata"
               src={lease.url}>

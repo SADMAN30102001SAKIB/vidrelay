@@ -9,6 +9,12 @@ export const platforms = [
 export const platformSchema = z.enum(platforms);
 export type Platform = z.infer<typeof platformSchema>;
 
+export const firstReleasePlatforms: readonly Platform[] = [
+  "youtube",
+  "facebook",
+  "instagram"
+];
+
 export const capabilityModes = [
   "disabled",
   "development_only",

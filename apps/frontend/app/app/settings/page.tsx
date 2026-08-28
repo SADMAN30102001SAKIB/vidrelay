@@ -5,7 +5,7 @@ import {
   deleteAccountSchema,
   updateProfileSchema
 } from "@vidrelay/shared";
-import { KeyRound, LogOut, Save, Trash2 } from "lucide-react";
+import { Check, Copy, KeyRound, LogOut, Save, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -59,6 +59,7 @@ function SettingsContent() {
   const [deletionReference, setDeletionReference] = useState<string | null>(
     null
   );
+  const [deletionReferenceCopied, setDeletionReferenceCopied] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -222,6 +223,7 @@ function SettingsContent() {
       });
       setDeletion(body.deletion);
       setDeletionReference(body.reference);
+      setDeletionReferenceCopied(false);
       setDeletionPassword("");
       setSuccess(
         "Deletion was requested and your server-side sessions were closed. Save the private reference below."
@@ -237,6 +239,27 @@ function SettingsContent() {
       setError(errorMessage(caught));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const copyDeletionReference = async () => {
+    if (deletionReference === null) {
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    try {
+      if (navigator.clipboard === undefined) {
+        throw new Error("Clipboard access is unavailable.");
+      }
+      await navigator.clipboard.writeText(deletionReference);
+      setDeletionReferenceCopied(true);
+      setSuccess("Private deletion reference copied to the clipboard.");
+    } catch {
+      setDeletionReferenceCopied(false);
+      setError(
+        "The browser could not copy the private reference. Select it and copy it manually."
+      );
     }
   };
 
@@ -487,8 +510,10 @@ function SettingsContent() {
           {deletionReference === null ? null : (
             <Notice tone="success">
               Private status reference:{" "}
-              <strong className="code-text">{deletionReference}</strong>. Copy
-              and keep it for the public status checker.
+              <strong className="code-text deletion-reference">
+                {deletionReference}
+              </strong>
+              . Copy and keep it for the public status checker.
             </Notice>
           )}
           {user?.role === "operator" ? (
@@ -535,6 +560,19 @@ function SettingsContent() {
             </form>
           ) : (
             <div className="button-row">
+              <Button
+                onClick={() => void copyDeletionReference()}
+                type="button"
+                variant="secondary">
+                {deletionReferenceCopied ? (
+                  <Check aria-hidden="true" size={16} />
+                ) : (
+                  <Copy aria-hidden="true" size={16} />
+                )}
+                {deletionReferenceCopied
+                  ? "Reference copied"
+                  : "Copy private reference"}
+              </Button>
               <Link className={buttonClass("secondary")} href="/data-deletion">
                 Open public status checker
               </Link>

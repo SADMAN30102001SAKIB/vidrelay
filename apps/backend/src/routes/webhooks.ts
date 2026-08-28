@@ -1,4 +1,5 @@
 import { and, eq, ne } from "drizzle-orm";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -140,7 +141,7 @@ const disconnectTiktokConnection = async (
 
 export const webhookRoutes = new Hono<AppEnv>();
 
-webhookRoutes.get("/meta", context => {
+const verifyMetaChallenge = (context: Context<AppEnv>): Response => {
   const mode = context.req.query("hub.mode");
   const challenge = context.req.query("hub.challenge");
   const token = context.req.query("hub.verify_token");
@@ -159,12 +160,16 @@ webhookRoutes.get("/meta", context => {
     );
   }
   return context.text(challenge);
-});
+};
 
-webhookRoutes.post("/meta", async context => {
+const recordMetaWebhook = async (
+  context: Context<AppEnv>,
+  provider: "facebook" | "instagram",
+  secret: string | undefined,
+  expectedObject: "instagram" | "page"
+): Promise<Response> => {
   const raw = await readRawBody(context.req.raw);
   const signatureHeader = context.req.header("X-Hub-Signature-256");
-  const secret = context.env.META_APP_SECRET;
   if (secret === undefined || !signatureHeader?.startsWith("sha256=")) {
     throw new AppError(
       401,
@@ -191,12 +196,18 @@ webhookRoutes.post("/meta", async context => {
       "The webhook body is invalid."
     );
   }
-  const provider =
-    body !== null &&
-    typeof body === "object" &&
-    (body as Record<string, unknown>).object === "instagram"
-      ? "instagram"
-      : "facebook";
+  if (
+    body === null ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    (body as Record<string, unknown>).object !== expectedObject
+  ) {
+    throw new AppError(
+      400,
+      "invalid_webhook_payload",
+      "The webhook payload does not match this callback."
+    );
+  }
   const payloadHash = await sha256Hex(raw);
   await createDb(context.env.DB)
     .insert(webhookEvents)
@@ -209,7 +220,21 @@ webhookRoutes.post("/meta", async context => {
     })
     .onConflictDoNothing();
   return context.body(null, 204);
-});
+};
+
+webhookRoutes.get("/meta/facebook", verifyMetaChallenge);
+webhookRoutes.get("/meta/instagram", verifyMetaChallenge);
+webhookRoutes.post("/meta/facebook", context =>
+  recordMetaWebhook(context, "facebook", context.env.META_APP_SECRET, "page")
+);
+webhookRoutes.post("/meta/instagram", context =>
+  recordMetaWebhook(
+    context,
+    "instagram",
+    context.env.INSTAGRAM_APP_SECRET,
+    "instagram"
+  )
+);
 
 webhookRoutes.post("/tiktok", async context => {
   const raw = await readRawBody(context.req.raw);

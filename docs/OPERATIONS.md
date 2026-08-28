@@ -6,7 +6,7 @@ writes and require an authorized operator.
 
 ## Local setup
 
-1. Install Node.js 24 and pnpm 11.20.0.
+1. Install Node.js 24 and pnpm 11.22.0.
 2. Install the locked dependency graph:
 
    ```powershell
@@ -70,11 +70,17 @@ Copy-Item apps/backend/wrangler.production.example.jsonc apps/backend/wrangler.p
 ```
 
 Replace every `REPLACE_WITH_...` sentinel in the copied file. The browser and API
-origins must be the customer's exact HTTPS origins, including scheme and host but
-no path or trailing slash. Enter the D1 UUID returned for the intended production
-database in `database_id`. Keep `ALLOW_SIGNUPS` false until registration abuse
-controls and the customer's launch policy have been approved. Never commit the
-filled production file.
+origins must be dedicated customer subdomains under the same registrable domain,
+for example `https://app.customer.example` and
+`https://api.customer.example`. This same-site topology is required because the
+static frontend makes credentialed, cross-origin API requests; a `pages.dev`
+frontend paired with a `workers.dev` API is cross-site and is not a supported
+production topology. Origins include the scheme and host but no path or trailing
+slash. Set the custom-domain route pattern to the API hostname only, without
+`https://`. Enter the D1 UUID returned for the intended production database in
+`database_id`. Keep `ALLOW_SIGNUPS` false until registration abuse controls and
+the customer's launch policy have been approved. Never commit the filled
+production file.
 
 ### Secret Worker variables
 
@@ -125,15 +131,16 @@ $body = @{
 try {
   Invoke-RestMethod -Method Post -Uri "REPLACE_WITH_EXACT_API_ORIGIN/api/auth/register" -Headers $headers -ContentType "application/json" -Body $body
 } finally {
-  Remove-Variable bootstrapToken, bootstrapPassword, body -ErrorAction SilentlyContinue
+  Remove-Variable bootstrapToken, bootstrapPassword, headers, body -ErrorAction SilentlyContinue
 }
 ```
 
 The endpoint accepts this secret only while the database contains no users; the
 conditional D1 batch prevents two concurrent requests from creating two initial
-operators. Verify the account can log in and reports role `operator`, then remove
-`BOOTSTRAP_SIGNUP_TOKEN` from
-the serving Worker without an immediate traffic change:
+operators. Verify the account can log in and reports role `operator`. Immediately
+remove the `BOOTSTRAP_SIGNUP_TOKEN` entry from `.env.production` and every
+deployment-secret bundle so a later upload cannot reintroduce it. Then create a
+new non-serving Worker version without the secret:
 
 ```powershell
 Set-Location apps/backend
@@ -142,10 +149,11 @@ pnpm exec wrangler versions secret delete BOOTSTRAP_SIGNUP_TOKEN --config wrangl
 
 Record and inspect the version ID returned by that command, then deploy that
 exact version with `wrangler versions deploy` as described in the release steps.
-Merely omitting the token from a later `--secrets-file` does not delete it.
-Never enable `ALLOW_SIGNUPS` merely to bootstrap a customer, leave the bootstrap
-token in the serving configuration, or store either bootstrap value in shell
-history.
+Deleting the local entry does not remove the serving secret, and merely omitting
+the token from a later `--secrets-file` does not delete it; both cleanup actions
+are required. Never enable `ALLOW_SIGNUPS` merely to bootstrap a customer, leave
+the bootstrap token in the serving configuration or a deployment-secret bundle,
+or store either bootstrap value in shell history.
 
 With public signup disabled, provision each customer from the authenticated
 operator session by sending `POST /api/auth/provision-customer` with the normal
@@ -158,17 +166,35 @@ authorization, transmit the initial password through an approved secure channel,
 and require it to be changed at first handoff. The service operator account cannot
 request its own deletion until operator responsibility has been handed off.
 
-Example from an authenticated browser session or an operator-controlled API
-client:
+The following PowerShell example logs in through one cookie-preserving web
+session and performs the authenticated provisioning request. Enter both passwords
+at masked prompts:
 
-```json
-{
-  "acknowledgement": "provision_customer",
-  "email": "owner@customer.example",
-  "name": "Customer owner",
-  "password": "replace-with-a-unique-temporary-password",
-  "timezone": "Asia/Dhaka",
-  "workspaceName": "Customer workspace"
+```powershell
+$operatorPassword = Read-Host "Service operator password" -MaskInput
+$customerPassword = Read-Host "Temporary customer password" -MaskInput
+$webSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$headers = @{
+  Origin = "REPLACE_WITH_EXACT_FRONTEND_ORIGIN"
+  "X-VidRelay-CSRF" = "1"
+}
+$loginBody = @{
+  email = "owner@customer.example"
+  password = $operatorPassword
+} | ConvertTo-Json
+$customerBody = @{
+  acknowledgement = "provision_customer"
+  email = "customer-owner@customer.example"
+  name = "Customer owner"
+  password = $customerPassword
+  timezone = "Asia/Dhaka"
+  workspaceName = "Customer workspace"
+} | ConvertTo-Json
+try {
+  Invoke-RestMethod -Method Post -Uri "REPLACE_WITH_EXACT_API_ORIGIN/api/auth/login" -WebSession $webSession -Headers $headers -ContentType "application/json" -Body $loginBody
+  Invoke-RestMethod -Method Post -Uri "REPLACE_WITH_EXACT_API_ORIGIN/api/auth/provision-customer" -WebSession $webSession -Headers $headers -ContentType "application/json" -Body $customerBody
+} finally {
+  Remove-Variable operatorPassword, customerPassword, webSession, headers, loginBody, customerBody -ErrorAction SilentlyContinue
 }
 ```
 
@@ -225,6 +251,11 @@ named `vidrelay`, or deliberately update the deployment configuration before
 release. The script explicitly deploys branch `main`; verify in the Pages project
 settings that `main` is the production branch, or deliberately update both the
 project and script together. Otherwise Wrangler creates a preview deployment.
+Attach the app subdomain to that Pages project under **Custom domains** before
+release. The app and API subdomains must share the same registrable customer
+domain. Do not publish or advertise the `pages.dev` or `workers.dev` addresses as
+production entry points; only the exact app custom domain belongs in
+`APP_ORIGINS`.
 The static frontend build must receive the production API origin as
 `NEXT_PUBLIC_API_URL`; a localhost value will otherwise be compiled into `out`.
 
@@ -257,7 +288,13 @@ Migration SQL lives in `apps/backend/migrations` and is generated from
 `apps/backend/src/db/schema.ts` through Drizzle.
 
 1. For a schema change, run `pnpm generate` and inspect every generated statement.
-2. Apply it locally with `pnpm migrate:local` and run the full verification suite.
+2. Apply it locally with `pnpm migrate:local`, run `pnpm migrations:rehearse`, and
+   run the full verification suite. The rehearsal uses the repository-pinned
+   Wrangler with `--local` and isolated state under the ignored
+   `apps/backend/.wrangler/migration-rehearsal` directory. It applies the complete
+   history to a fresh database, then upgrades a database populated after migration
+   `0000` with two posts and their destination, attempt, and media-lease records.
+   It never selects or writes a remote D1 database.
 3. Before a production migration, record the target database/account, run
    `pnpm migrations:list:remote`, verify the database name and ID selected by the
    ignored production config, create the appropriate D1 backup/export, and obtain
@@ -267,8 +304,9 @@ Migration SQL lives in `apps/backend/migrations` and is generated from
    deploying code that requires the new schema.
 
 Generated SQL is review input, not proof that an existing populated database can
-apply it safely. Migration `0001` is immutable history and adds the required
-idempotency key without a default; it assumes the `posts` table is still empty.
+apply it safely. Migration `0001` adds the required idempotency key with a
+temporary default and assigns each pre-existing post a unique `legacy:<post-id>`
+value before creating the workspace/key unique index.
 Migration `0002` deliberately invalidates only in-flight OAuth state rows,
 because those short-lived rows cannot be retroactively bound to the initiating
 session; users can restart the connection flow after upgrade. It then adds the
@@ -291,12 +329,15 @@ Reference: [Cloudflare D1 migrations](https://developers.cloudflare.com/d1/refer
 Run the repository gate from the root:
 
 ```powershell
-$env:NEXT_PUBLIC_API_URL = "http://localhost:4000"
+$env:NEXT_PUBLIC_API_URL = "https://api.vidrelay.invalid"
 pnpm check
 ```
 
-It must pass formatting, ESLint, TypeScript/Workers binding checks, Vitest, Fallow,
-and both builds. A dry-run Worker build is not a production deployment.
+It must pass formatting, ESLint, TypeScript/Workers binding checks, the isolated
+local D1 migration rehearsal, Vitest, Fallow, and both builds. The reserved
+`.invalid` origin is only for a non-serving local build gate; use the exact
+customer API origin for every preview or release build. A dry-run Worker build is
+not a production deployment.
 For a release candidate, copy/fill the ignored production config and additionally
 run this non-deploying check after verifying every sentinel is gone:
 
@@ -309,6 +350,8 @@ Before enabling a provider or releasing:
 - inspect `GET /api/config` and confirm every configured/mode pair matches the
   actual provider console;
 - register/login/logout and verify cross-origin session and CSRF behavior;
+- repeat login/session checks in Safari from the exact same-site app and API
+  custom domains;
 - connect and disconnect an approved test account for each enabled platform;
 - upload a known-good common-profile MP4 through the production direct-upload path;
 - submit one destination at a time, then one post targeting every enabled
@@ -349,8 +392,9 @@ Before enabling a provider or releasing:
    `pnpm exec wrangler triggers deploy --config wrangler.production.jsonc`.
    Version uploads do not apply triggers automatically. For a later release with
    unchanged secrets, `pnpm deploy:backend` deploys the reviewed source and
-   configured triggers directly. Every command in this step changes remote state
-   except `versions upload`, which does not shift traffic.
+   configured triggers directly. Every command in this step changes remote
+   state. `versions upload` creates a remote version but does not shift traffic;
+   the later deployment and trigger commands make the serving changes.
 9. Verify the `*/5 * * * *` Cron Trigger, API health/config endpoints, and Worker
    logs.
 10. Build the static frontend with the production `NEXT_PUBLIC_API_URL`, then run
@@ -383,6 +427,20 @@ The frontend is a static Pages export. See Cloudflare's
   `POST /api/account/deletions/<deletion-id>/retry` with
   `{"acknowledgement":"retry_deletion"}`. The request is audited; do not use it
   before verifying the target ID and cleanup cause.
+- If the retry returns `provider_revocation_resolution_required`, one or more
+  provider calls started without a recorded outcome. Resolve **every** affected
+  connection before continuing. Use
+  `{"acknowledgement":"retry_deletion","providerRevocationResolution":"retry_revoke"}`
+  to retry provider cleanup. A retry is not proof of revocation: invalid or
+  expired credentials and a lost response can still require independent provider
+  confirmation. Use `"confirmed_revoked"` only after independently confirming
+  that every affected authorization is already revoked; it marks all ambiguous
+  revocations in that deletion workspace complete and must never be used merely
+  to bypass provider cleanup.
+- A customer disconnect first attempts provider revocation. If that outcome cannot
+  be confirmed, the UI offers an explicit local-only removal that destroys the
+  stored VidRelay credential and warns the customer to remove VidRelay from the
+  provider's connected-app settings. The audit event records this distinction.
 
 To roll back application code, deploy a previously verified Worker/Pages revision
 using the normal Cloudflare rollback or deployment workflow and preserve evidence.

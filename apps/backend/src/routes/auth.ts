@@ -337,8 +337,8 @@ authRoutes.post("/register", async context => {
   }
 
   const now = Date.now();
-  let userId = crypto.randomUUID();
-  let workspaceId = crypto.randomUUID();
+  let userId: string = crypto.randomUUID();
+  let workspaceId: string = crypto.randomUUID();
   const passwordHash = await hashPassword(input.password);
 
   try {

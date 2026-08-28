@@ -13,45 +13,6 @@
   "duplicates": {
     "threshold": 5
   },
-  "health": {
-    "thresholdOverrides": [
-      {
-        "files": [
-          "apps/backend/src/oauth/providers.ts",
-          "apps/backend/src/publishing/facebook.ts",
-          "apps/backend/src/publishing/instagram.ts",
-          "apps/backend/src/publishing/tiktok.ts",
-          "apps/backend/src/publishing/workflow.ts",
-          "apps/backend/src/publishing/youtube.ts",
-          "apps/backend/src/routes/account.ts",
-          "apps/backend/src/routes/auth.ts",
-          "apps/backend/src/routes/connections.ts",
-          "apps/backend/src/routes/posts.ts",
-          "apps/backend/src/routes/uploads.ts",
-          "apps/backend/src/routes/webhooks.ts"
-        ],
-        "maxCognitive": 100,
-        "maxCrap": 1500,
-        "maxCyclomatic": 100,
-        "maxUnitSize": 1000,
-        "reason": "Existing provider and lifecycle orchestrators are baselined while default limits remain active elsewhere."
-      },
-      {
-        "files": [
-          "apps/backend/src/lib/mp4.ts",
-          "apps/frontend/app/app/create/page.tsx",
-          "apps/frontend/app/app/posts/detail/page.tsx",
-          "apps/frontend/app/app/settings/page.tsx",
-          "apps/frontend/components/VideoUploader.tsx"
-        ],
-        "maxCognitive": 100,
-        "maxCrap": 1500,
-        "maxCyclomatic": 100,
-        "maxUnitSize": 1000,
-        "reason": "Existing media parsing and stateful UI flows are baselined while default limits remain active elsewhere."
-      }
-    ]
-  },
   "usedClassMembers": [
     {
       "extends": "WorkflowEntrypoint",

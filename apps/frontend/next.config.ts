@@ -1,15 +1,21 @@
 import type { NextConfig } from "next";
 
-if (
-  process.env.NODE_ENV === "production" &&
-  !process.env.NEXT_PUBLIC_API_URL?.trim()
-) {
-  throw new Error(
-    "NEXT_PUBLIC_API_URL must be set before building or deploying the production frontend."
-  );
-}
+import { resolveApiUrl } from "./lib/api-origin";
+
+const allowInsecureLoopback = process.env.npm_lifecycle_event === "preview";
+
+resolveApiUrl(
+  process.env.NEXT_PUBLIC_API_URL,
+  process.env.NODE_ENV,
+  allowInsecureLoopback
+);
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_VIDRELAY_ALLOW_INSECURE_LOOPBACK: allowInsecureLoopback
+      ? "true"
+      : "false"
+  },
   images: {
     unoptimized: true
   },

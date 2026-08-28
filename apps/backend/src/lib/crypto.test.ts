@@ -31,11 +31,15 @@ describe("credential cryptography", () => {
 
   it("rejects a modified ciphertext", async () => {
     const encrypted = await encryptJson({ value: "private" }, encryptionKey);
-    const replacement = encrypted.endsWith("A") ? "B" : "A";
+    const [version, iv, ciphertext] = encrypted.split(".") as [
+      string,
+      string,
+      string
+    ];
+    const replacement = ciphertext.startsWith("A") ? "B" : "A";
+    const modified = [version, iv, replacement + ciphertext.slice(1)].join(".");
 
-    await expect(
-      decryptJson(encrypted.slice(0, -1) + replacement, encryptionKey)
-    ).rejects.toThrow();
+    await expect(decryptJson(modified, encryptionKey)).rejects.toThrow();
   });
 
   it("matches the standard HMAC-SHA256 test vector", async () => {

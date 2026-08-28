@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "preview": "pnpm build && wrangler pages dev out --port 3000",
+    "preview": "next build && wrangler pages dev out --port 3000",
     "deploy": "pnpm build && wrangler pages deploy out --project-name vidrelay --branch main"
   },
   "dependencies": {

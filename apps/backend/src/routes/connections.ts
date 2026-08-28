@@ -1,5 +1,5 @@
 import { platformSchema } from "@vidrelay/shared";
-import { and, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -28,7 +28,17 @@ import {
   toConnection,
   type StoredCredentials
 } from "../platforms/credentials";
+import {
+  activeGrantSiblingState,
+  type ActiveGrantSiblingState
+} from "../platforms/grants";
 import { providerJson } from "../platforms/http";
+import {
+  facebookScopes,
+  fetchMetaGrantedScopes,
+  hasEveryScope,
+  instagramScopes
+} from "../platforms/meta-permissions";
 import { revokeProviderCredentials } from "../platforms/revoke";
 import { requireAuth } from "../middleware/auth";
 
@@ -59,15 +69,6 @@ const callbackRedirect = (
     url.searchParams.set("count", String(count));
   }
   return url.toString();
-};
-
-const facebookGrantId = (metadataJson: string): string | null => {
-  try {
-    const value = JSON.parse(metadataJson) as Record<string, unknown>;
-    return typeof value.grantUserId === "string" ? value.grantUserId : null;
-  } catch {
-    return null;
-  }
 };
 
 const facebookPublishingTasks = new Set([
@@ -535,6 +536,17 @@ connectionRoutes.post("/:id/check", requireAuth, async context => {
           message: "Facebook no longer grants publishing access to this Page."
         });
       }
+      const grantedScopes = await fetchMetaGrantedScopes(
+        context.env,
+        "facebook",
+        credentials.userAccessToken
+      );
+      if (!hasEveryScope(grantedScopes, facebookScopes)) {
+        throw new ProviderError({
+          code: "facebook_publish_permission_missing",
+          message: "Facebook no longer grants every required permission."
+        });
+      }
     } else {
       const host = "graph.instagram.com";
       const url = new URL(
@@ -551,6 +563,17 @@ connectionRoutes.post("/:id/check", requireAuth, async context => {
         { headers: { Authorization: "Bearer " + credentials.accessToken } },
         { operation: "instagram_connection_check" }
       );
+      const grantedScopes = await fetchMetaGrantedScopes(
+        context.env,
+        "instagram",
+        credentials.accessToken
+      );
+      if (!hasEveryScope(grantedScopes, instagramScopes)) {
+        throw new ProviderError({
+          code: "instagram_publish_permission_missing",
+          message: "Instagram no longer grants every required permission."
+        });
+      }
     }
 
     const now = Date.now();
@@ -608,7 +631,12 @@ connectionRoutes.post("/:id/check", requireAuth, async context => {
         error.providerStatus === 403);
     const publishPermissionMissing =
       error instanceof ProviderError &&
-      error.code === "facebook_publish_permission_missing";
+      (error.code === "facebook_publish_permission_missing" ||
+        error.code === "instagram_publish_permission_missing");
+    const missingPermissionMessage =
+      row.provider === "instagram"
+        ? "Instagram no longer grants every required publishing permission."
+        : "Facebook no longer grants publishing access to this Page.";
     await db
       .update(socialConnections)
       .set({
@@ -621,7 +649,7 @@ connectionRoutes.post("/:id/check", requireAuth, async context => {
         lastErrorMessage: requiresReauth
           ? "Reconnect this account to continue publishing."
           : publishPermissionMissing
-            ? "Facebook no longer grants publishing access to this Page."
+            ? missingPermissionMessage
             : "The provider connection could not be checked.",
         status: requiresReauth
           ? "reauth_required"
@@ -644,17 +672,32 @@ connectionRoutes.post("/:id/check", requireAuth, async context => {
         )
       );
     throw new AppError(
-      requiresReauth ? 409 : 502,
-      requiresReauth ? "reauth_required" : "connection_check_failed",
+      requiresReauth || publishPermissionMissing ? 409 : 502,
+      requiresReauth
+        ? "reauth_required"
+        : publishPermissionMissing
+          ? "publish_permission_missing"
+          : "connection_check_failed",
       requiresReauth
         ? "Reconnect this account to continue publishing."
-        : "The provider connection could not be checked."
+        : publishPermissionMissing
+          ? missingPermissionMessage
+          : "The provider connection could not be checked."
     );
   }
 });
 
 connectionRoutes.delete("/:id", requireAuth, async context => {
   const auth = context.get("auth");
+  const localOnlyValue = context.req.query("localOnly");
+  if (localOnlyValue !== undefined && localOnlyValue !== "true") {
+    throw new AppError(
+      400,
+      "invalid_local_only_resolution",
+      "The local-only disconnect resolution is invalid."
+    );
+  }
+  const localOnly = localOnlyValue === "true";
   const db = createDb(context.env.DB);
   const [row] = await db
     .select()
@@ -677,16 +720,15 @@ connectionRoutes.delete("/:id", requireAuth, async context => {
     return context.body(null, 204);
   }
 
-  const credentials = await decodeCredentials(
-    context.env,
-    row.credentialsEncrypted
-  );
+  const credentials = localOnly
+    ? null
+    : await decodeCredentials(context.env, row.credentialsEncrypted);
   const now = Date.now();
   const staleDisconnectBefore = now - 15 * 60 * 1000;
   const disconnectToken = "disconnecting:" + crypto.randomUUID();
   const claim = await context.env.DB.batch([
     context.env.DB.prepare(
-      "UPDATE social_connections SET status = 'limited', last_error_code = ?, last_error_message = 'Provider authorization is being revoked.', updated_at = ? WHERE id = ? AND workspace_id = ? AND credentials_encrypted = ? AND ((status = ? AND (last_error_code IS NULL OR last_error_code NOT LIKE 'disconnecting:%')) OR (status = 'limited' AND last_error_code LIKE 'disconnecting:%' AND updated_at < ?)) AND NOT EXISTS (SELECT 1 FROM social_connections AS sibling WHERE sibling.provider = 'tiktok' AND sibling.remote_account_id = social_connections.remote_account_id AND sibling.id <> social_connections.id AND (sibling.last_error_code LIKE 'disconnecting:%' OR sibling.last_error_code LIKE 'account_deletion_revoke_started:%') AND sibling.updated_at >= ?)"
+      "UPDATE social_connections SET status = 'limited', last_error_code = ?, last_error_message = 'Provider authorization is being revoked.', refresh_lease_id = NULL, refresh_lease_expires_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ? AND credentials_encrypted = ? AND ((status = ? AND (last_error_code IS NULL OR (last_error_code NOT LIKE 'disconnecting:%' AND last_error_code NOT LIKE 'account_deletion_revoke_started%' AND last_error_code <> 'account_deletion_revoke_completed'))) OR (? = 1 AND status = 'limited' AND last_error_code LIKE 'disconnecting:%') OR (status = 'limited' AND last_error_code LIKE 'disconnecting:%' AND updated_at < ?)) AND (refresh_lease_id IS NULL OR (refresh_lease_expires_at IS NOT NULL AND refresh_lease_expires_at < ?)) AND EXISTS (SELECT 1 FROM workspaces INNER JOIN users ON users.id = social_connections.connected_by_user_id WHERE workspaces.id = social_connections.workspace_id AND workspaces.status = 'active' AND users.status = 'active') AND (? = 1 OR NOT EXISTS (SELECT 1 FROM social_connections AS sibling WHERE sibling.provider = social_connections.provider AND sibling.id <> social_connections.id AND (sibling.last_error_code LIKE 'disconnecting:%' OR sibling.last_error_code LIKE 'account_deletion_revoke_started:%') AND sibling.updated_at >= ? AND ((social_connections.provider IN ('instagram', 'tiktok') AND sibling.remote_account_id = social_connections.remote_account_id) OR (social_connections.provider = 'facebook' AND (CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantUserId') END IS NULL OR CASE WHEN json_valid(sibling.metadata_json) THEN json_extract(sibling.metadata_json, '$.grantUserId') END IS NULL OR CASE WHEN json_valid(sibling.metadata_json) THEN json_extract(sibling.metadata_json, '$.grantUserId') END = CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantUserId') END)) OR (social_connections.provider = 'youtube' AND (CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantSubject') END IS NULL OR CASE WHEN json_valid(sibling.metadata_json) THEN json_extract(sibling.metadata_json, '$.grantSubject') END IS NULL OR CASE WHEN json_valid(sibling.metadata_json) THEN json_extract(sibling.metadata_json, '$.grantSubject') END = CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantSubject') END)))))"
     ).bind(
       disconnectToken,
       now,
@@ -694,7 +736,10 @@ connectionRoutes.delete("/:id", requireAuth, async context => {
       auth.workspaceId,
       row.credentialsEncrypted,
       row.status,
+      localOnly ? 1 : 0,
       staleDisconnectBefore,
+      now,
+      localOnly ? 1 : 0,
       staleDisconnectBefore
     ),
     context.env.DB.prepare(
@@ -740,75 +785,32 @@ connectionRoutes.delete("/:id", requireAuth, async context => {
     );
   };
 
-  let revokeProvider = true;
-  if (row.provider === "facebook") {
-    const siblings = await db
-      .select()
-      .from(socialConnections)
-      .where(
-        and(
-          eq(socialConnections.provider, "facebook"),
-          inArray(socialConnections.status, ["connected", "limited"]),
-          ne(socialConnections.id, row.id)
-        )
-      );
-    const grantId = facebookGrantId(row.metadataJson);
-    if (grantId !== null) {
-      revokeProvider = !siblings.some(
-        sibling => facebookGrantId(sibling.metadataJson) === grantId
-      );
-    } else if (credentials.userAccessToken !== null) {
-      for (const sibling of siblings) {
-        try {
-          const siblingCredentials = await decodeCredentials(
-            context.env,
-            sibling.credentialsEncrypted
-          );
-          if (
-            siblingCredentials.userAccessToken === credentials.userAccessToken
-          ) {
-            revokeProvider = false;
-            break;
-          }
-        } catch {
-          continue;
-        }
+  let grantSiblingState: ActiveGrantSiblingState = "none";
+  try {
+    if (credentials !== null) {
+      try {
+        grantSiblingState = await activeGrantSiblingState(
+          db,
+          context.env,
+          row,
+          credentials
+        );
+      } catch {
+        throw new AppError(
+          409,
+          "provider_grant_identity_unknown",
+          "VidRelay could not confirm whether another connection shares this provider authorization. Retry, or choose local-only removal."
+        );
       }
     }
-  } else if (row.provider === "tiktok") {
-    const [sharedGrant] = await db
-      .select({ id: socialConnections.id })
-      .from(socialConnections)
-      .where(
-        and(
-          eq(socialConnections.provider, "tiktok"),
-          eq(socialConnections.remoteAccountId, row.remoteAccountId),
-          inArray(socialConnections.status, [
-            "connected",
-            "limited",
-            "reauth_required"
-          ]),
-          or(
-            isNull(socialConnections.lastErrorCode),
-            and(
-              ne(socialConnections.lastErrorCode, "disconnecting"),
-              sql`${socialConnections.lastErrorCode} NOT LIKE 'disconnecting:%'`,
-              or(
-                sql`${socialConnections.lastErrorCode} NOT LIKE 'account_deletion_revoke_started:%'`,
-                sql`${socialConnections.updatedAt} < ${staleDisconnectBefore}`
-              )
-            )
-          ),
-          sql`EXISTS (SELECT 1 FROM workspaces INNER JOIN users ON users.id = ${socialConnections.connectedByUserId} WHERE workspaces.id = ${socialConnections.workspaceId} AND workspaces.status = 'active' AND users.status = 'active')`,
-          ne(socialConnections.id, row.id)
-        )
-      )
-      .limit(1);
-    revokeProvider = sharedGrant === undefined;
-  }
-
-  try {
-    if (revokeProvider) {
+    if (credentials !== null && grantSiblingState === "unknown") {
+      throw new AppError(
+        409,
+        "provider_grant_identity_unknown",
+        "Reconnect this provider account before disconnecting it so shared authorization can be handled safely."
+      );
+    }
+    if (credentials !== null && grantSiblingState === "none") {
       if (!(await stillOwnsDisconnect())) {
         throw new AppError(
           409,
@@ -819,15 +821,43 @@ connectionRoutes.delete("/:id", requireAuth, async context => {
       await revokeProviderCredentials(context.env, row, credentials);
     }
   } catch (error) {
-    if (error instanceof AppError && error.code === "connection_changed") {
+    if (
+      error instanceof AppError &&
+      (error.code === "connection_changed" ||
+        error.code === "provider_grant_identity_unknown")
+    ) {
+      if (error.code === "provider_grant_identity_unknown") {
+        await db
+          .update(socialConnections)
+          .set({
+            lastErrorCode: error.code,
+            lastErrorMessage: error.message,
+            status: "limited",
+            updatedAt: Date.now()
+          })
+          .where(
+            and(
+              eq(socialConnections.id, row.id),
+              eq(
+                socialConnections.credentialsEncrypted,
+                row.credentialsEncrypted
+              ),
+              eq(socialConnections.lastErrorCode, disconnectToken)
+            )
+          );
+      }
       throw error;
     }
+    const outcomeUnknown =
+      error instanceof ProviderError && error.outcomeUnknown;
     await db
       .update(socialConnections)
       .set({
-        lastErrorCode: "provider_revoke_failed",
+        lastErrorCode: outcomeUnknown
+          ? disconnectToken
+          : "provider_revoke_failed",
         lastErrorMessage:
-          "Provider authorization could not be revoked. Try again.",
+          "Provider revocation was not confirmed. Retry or explicitly remove only VidRelay's stored credentials.",
         status: "limited",
         updatedAt: Date.now()
       })
@@ -853,9 +883,9 @@ connectionRoutes.delete("/:id", requireAuth, async context => {
       requestId: context.get("requestId")
     });
     throw new AppError(
-      502,
-      "provider_revoke_failed",
-      "The provider authorization could not be revoked. Try disconnecting again."
+      409,
+      "provider_revocation_unconfirmed",
+      "The provider did not confirm revocation. Retry, or remove VidRelay from the provider and choose local-only removal."
     );
   }
 
@@ -920,14 +950,29 @@ connectionRoutes.delete("/:id", requireAuth, async context => {
       "The connection changed while it was being disconnected."
     );
   }
-  await writeAuditEvent(db, {
-    action: "connection.disconnected",
-    actorUserId: auth.userId,
-    entityId: row.id,
-    entityType: "connection",
-    metadata: { provider: row.provider },
-    workspaceId: auth.workspaceId
-  });
+  try {
+    await writeAuditEvent(db, {
+      action: "connection.disconnected",
+      actorUserId: auth.userId,
+      entityId: row.id,
+      entityType: "connection",
+      metadata: {
+        provider: row.provider,
+        providerRevocation: localOnly
+          ? "unconfirmed_local_only"
+          : grantSiblingState === "shared"
+            ? "shared_grant_retained"
+            : "confirmed"
+      },
+      workspaceId: auth.workspaceId
+    });
+  } catch (error) {
+    safeLog("error", "connection.audit_failed", {
+      connectionId: row.id,
+      error: error instanceof Error ? error.message : "unknown",
+      requestId: context.get("requestId")
+    });
+  }
 
   return context.body(null, 204);
 });

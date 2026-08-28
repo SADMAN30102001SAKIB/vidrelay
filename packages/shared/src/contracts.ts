@@ -302,6 +302,10 @@ export const deleteAccountSchema = z.object({
   password: z.string().min(1).max(128)
 });
 
+export const deletionStatusLookupSchema = z.object({
+  reference: z.string().trim().min(24).max(128)
+});
+
 export const deletionStatusSchema = z.enum([
   "requested",
   "processing",
@@ -344,5 +348,8 @@ export const deletionViewSchema = z.object({
 export type DeletionView = z.infer<typeof deletionViewSchema>;
 
 export const retryDeletionSchema = z.object({
-  acknowledgement: z.literal("retry_deletion")
+  acknowledgement: z.literal("retry_deletion"),
+  providerRevocationResolution: z
+    .enum(["confirmed_revoked", "retry_revoke"])
+    .optional()
 });

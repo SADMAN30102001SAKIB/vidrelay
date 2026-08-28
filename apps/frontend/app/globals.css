@@ -8,14 +8,16 @@
   --surface-raised: #ffffff;
   --border: #dce3ed;
   --border-strong: #c7d1df;
-  --primary: #0f6fff;
-  --primary-strong: #0754c9;
+  --primary: #075fc7;
+  --primary-strong: #064da4;
+  --on-primary: #ffffff;
   --primary-soft: #e7f0ff;
   --success: #087f5b;
   --success-soft: #def7ed;
   --warning: #a15c00;
   --warning-soft: #fff2d6;
   --danger: #c12f3f;
+  --on-danger: #ffffff;
   --danger-soft: #ffe9ec;
   --info: #155eef;
   --info-soft: #e8f0ff;
@@ -40,12 +42,14 @@
     --border-strong: #30445f;
     --primary: #6da7ff;
     --primary-strong: #8fbbff;
+    --on-primary: #07111f;
     --primary-soft: #132d53;
     --success: #4bd4a5;
     --success-soft: #0d392f;
     --warning: #ffbe55;
     --warning-soft: #3c2a0f;
     --danger: #ff7b88;
+    --on-danger: #07111f;
     --danger-soft: #461e27;
     --info: #80adff;
     --info-soft: #172f58;
@@ -398,7 +402,7 @@ textarea {
 
 .button-primary {
   background: var(--primary);
-  color: #ffffff;
+  color: var(--on-primary);
 }
 
 .button-primary:hover:not(:disabled) {
@@ -424,7 +428,7 @@ textarea {
 
 .button-danger {
   background: var(--danger);
-  color: #ffffff;
+  color: var(--on-danger);
 }
 
 .button-small {
@@ -616,6 +620,10 @@ textarea {
 
 .notice p {
   margin: 0;
+}
+
+.notice > div {
+  min-width: 0;
 }
 
 .notice-info {
@@ -1368,6 +1376,10 @@ textarea {
   padding: 0.12rem 0.35rem;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.85em;
+}
+
+.deletion-reference {
+  overflow-wrap: anywhere;
 }
 
 .visually-hidden {

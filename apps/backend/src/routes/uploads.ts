@@ -640,6 +640,7 @@ uploadRoutes.post("/:id/complete", async context => {
       "This upload cannot be completed."
     );
   }
+  const multipartUploadId = row.multipartUploadId;
   const parts = validatePartList(row, input.parts);
 
   const claimVersion = Date.now();
@@ -677,13 +678,13 @@ uploadRoutes.post("/:id/complete", async context => {
       if (row.uploadMode === "direct") {
         await completeR2MultipartUpload(context.env, {
           key: row.r2Key,
-          multipartUploadId: row.multipartUploadId,
+          multipartUploadId,
           parts
         });
       } else {
         await context.env.MEDIA.resumeMultipartUpload(
           row.r2Key,
-          row.multipartUploadId
+          multipartUploadId
         ).complete(parts);
       }
     } catch (error) {

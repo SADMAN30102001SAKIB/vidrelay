@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   description:
-    "Publish one verified video to your connected social channels with destination-by-destination control.",
+    "Publish one preflighted video to your connected social channels with destination-by-destination control.",
   title: {
     default: "VidRelay",
     template: "%s · VidRelay"

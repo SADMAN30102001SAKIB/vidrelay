@@ -48,7 +48,11 @@ export function DataDeletionLookup() {
     setDeletion(null);
     try {
       const body = await apiRequest<{ deletion: DeletionView }>(
-        `/api/deletion-status/${encodeURIComponent(reference.trim())}`
+        "/api/deletion-status",
+        {
+          body: JSON.stringify({ reference: reference.trim() }),
+          method: "POST"
+        }
       );
       setDeletion(body.deletion);
     } catch (caught) {

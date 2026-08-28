@@ -14,6 +14,12 @@ import {
   encodeCredentials,
   type StoredCredentials
 } from "../platforms/credentials";
+import {
+  facebookScopes,
+  fetchMetaGrantedScopes,
+  hasEveryScope,
+  instagramScopes
+} from "../platforms/meta-permissions";
 import { revokeProviderGrant } from "../platforms/revoke";
 import { latestTiktokRemoval } from "../platforms/tiktok-removals";
 
@@ -80,17 +86,10 @@ const baseCredential = (input: {
   userAccessToken: input.userAccessToken ?? null
 });
 
-const facebookScopes = [
-  "pages_show_list",
-  "pages_read_engagement",
-  "pages_manage_posts"
-] as const;
-const instagramScopes = [
-  "instagram_business_basic",
-  "instagram_business_content_publish"
-] as const;
 const youtubeScopes = [
-  "https://www.googleapis.com/auth/youtube.upload"
+  "openid",
+  "https://www.googleapis.com/auth/youtube.upload",
+  "https://www.googleapis.com/auth/youtube.readonly"
 ] as const;
 const tiktokScopes = ["user.info.basic", "video.publish"] as const;
 
@@ -235,8 +234,6 @@ const connectionStatement = (
     Number.isSafeInteger(authorizedAt)
       ? authorizedAt
       : null;
-  const tiktokLifecycleFreshAfter =
-    tiktokAuthorizedAt === null ? null : tiktokAuthorizedAt - 15 * 60 * 1000;
   const connectionExisted = prepared.previousCredentialsEncrypted !== null;
   const expectedCredentials =
     prepared.previousCredentialsEncrypted ?? prepared.credentialsEncrypted;
@@ -248,15 +245,32 @@ const connectionStatement = (
     tiktokRemovalPrefix === null
       ? ""
       : " AND NOT EXISTS (SELECT 1 FROM webhook_events WHERE provider = 'tiktok' AND provider_event_id IS NOT NULL AND instr(provider_event_id, ?) = 1 AND status IN ('received', 'processed', 'failed') AND CAST(substr(provider_event_id, length(?) + 1) AS INTEGER) * 1000 >= ?)";
-  const tiktokDisconnectGuard =
-    tiktokAuthorizedAt === null
-      ? ""
-      : " AND NOT EXISTS (SELECT 1 FROM social_connections AS disconnecting_connection WHERE disconnecting_connection.provider = 'tiktok' AND disconnecting_connection.remote_account_id = ? AND (disconnecting_connection.last_error_code LIKE 'disconnecting:%' OR disconnecting_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND disconnecting_connection.updated_at >= ?)";
+  const metadataGrantId =
+    prepared.input.platform === "facebook"
+      ? prepared.input.metadata.grantUserId
+      : prepared.input.platform === "youtube"
+        ? prepared.input.metadata.grantSubject
+        : null;
+  const usesRemoteGrantId =
+    prepared.input.platform === "instagram" ||
+    prepared.input.platform === "tiktok";
+  const providerGrantId = usesRemoteGrantId
+    ? prepared.input.remoteAccountId
+    : typeof metadataGrantId === "string" && metadataGrantId.length > 0
+      ? metadataGrantId
+      : null;
+  const grantMetadataPath =
+    prepared.input.platform === "facebook" ? "$.grantUserId" : "$.grantSubject";
+  const removalFreshAfter = now - 15 * 60 * 1000;
+  const providerRemovalGuard =
+    providerGrantId === null
+      ? " AND NOT EXISTS (SELECT 1 FROM social_connections AS removing_connection WHERE removing_connection.provider = ? AND (removing_connection.last_error_code LIKE 'disconnecting:%' OR removing_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND removing_connection.updated_at >= ?)"
+      : " AND NOT EXISTS (SELECT 1 FROM social_connections AS removing_connection WHERE removing_connection.provider = ? AND ((? = 1 AND removing_connection.remote_account_id = ?) OR (? = 0 AND (CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, ?) END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, ?) END = ?))) AND (removing_connection.last_error_code LIKE 'disconnecting:%' OR removing_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND removing_connection.updated_at >= ?)";
   return context.bindings.DB.prepare(
     "INSERT INTO social_connections (id, workspace_id, connected_by_user_id, provider, remote_account_id, display_name, avatar_url, credentials_encrypted, key_version, scopes_json, metadata_json, status, expires_at, last_checked_at, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ? FROM users INNER JOIN memberships ON memberships.user_id = users.id INNER JOIN workspaces ON workspaces.id = memberships.workspace_id WHERE users.id = ? AND users.status = 'active' AND workspaces.id = ? AND workspaces.status = 'active' AND ((? IS NULL AND NOT EXISTS (SELECT 1 FROM social_connections WHERE workspace_id = ? AND provider = ? AND remote_account_id = ?)) OR EXISTS (SELECT 1 FROM social_connections WHERE id = ? AND credentials_encrypted = ? AND (? IS NULL OR provider <> 'tiktok' OR status <> 'disconnected' OR last_error_code <> 'authorization_removed' OR disconnected_at IS NULL OR disconnected_at < ?)) OR (? IS NOT NULL AND EXISTS (SELECT 1 FROM social_connections WHERE id = ? AND provider = 'tiktok' AND status = 'disconnected' AND last_error_code = 'authorization_removed' AND disconnected_at IS NOT NULL AND disconnected_at < ?)))" +
       tiktokRemovalGuard +
-      tiktokDisconnectGuard +
-      " ON CONFLICT(workspace_id, provider, remote_account_id) DO UPDATE SET connected_by_user_id = excluded.connected_by_user_id, display_name = excluded.display_name, avatar_url = excluded.avatar_url, credentials_encrypted = excluded.credentials_encrypted, key_version = 1, scopes_json = excluded.scopes_json, metadata_json = excluded.metadata_json, status = excluded.status, expires_at = excluded.expires_at, last_checked_at = excluded.last_checked_at, last_error_code = NULL, last_error_message = NULL, disconnected_at = NULL, refresh_lease_id = NULL, refresh_lease_expires_at = NULL, updated_at = excluded.updated_at WHERE social_connections.credentials_encrypted = ? AND ? = 1 AND ((social_connections.provider <> 'tiktok' AND (social_connections.last_error_code IS NULL OR social_connections.last_error_code NOT LIKE 'disconnecting:%')) OR (social_connections.provider = 'tiktok' AND (social_connections.last_error_code IS NULL OR (social_connections.last_error_code NOT LIKE 'disconnecting:%' AND social_connections.last_error_code NOT LIKE 'account_deletion_revoke_started:%') OR social_connections.updated_at < ?)))"
+      providerRemovalGuard +
+      " ON CONFLICT(workspace_id, provider, remote_account_id) DO UPDATE SET connected_by_user_id = excluded.connected_by_user_id, display_name = excluded.display_name, avatar_url = excluded.avatar_url, credentials_encrypted = excluded.credentials_encrypted, key_version = 1, scopes_json = excluded.scopes_json, metadata_json = excluded.metadata_json, status = excluded.status, expires_at = excluded.expires_at, last_checked_at = excluded.last_checked_at, last_error_code = NULL, last_error_message = NULL, disconnected_at = NULL, refresh_lease_id = NULL, refresh_lease_expires_at = NULL, updated_at = excluded.updated_at WHERE social_connections.credentials_encrypted = ? AND ? = 1 AND (social_connections.last_error_code IS NULL OR (social_connections.last_error_code <> 'account_deletion_revoke_completed' AND ((social_connections.last_error_code NOT LIKE 'disconnecting:%' AND social_connections.last_error_code NOT LIKE 'account_deletion_revoke_started:%') OR social_connections.updated_at < ?)))"
   ).bind(
     prepared.id,
     prepared.input.workspaceId,
@@ -288,16 +302,22 @@ const connectionStatement = (
     tiktokAuthorizedAt,
     ...(tiktokRemovalPrefix === null
       ? []
+      : [tiktokRemovalPrefix, tiktokRemovalPrefix, tiktokAuthorizedAt]),
+    ...(providerGrantId === null
+      ? [prepared.input.platform, removalFreshAfter]
       : [
-          tiktokRemovalPrefix,
-          tiktokRemovalPrefix,
-          tiktokAuthorizedAt,
-          prepared.input.remoteAccountId,
-          tiktokLifecycleFreshAfter
+          prepared.input.platform,
+          usesRemoteGrantId ? 1 : 0,
+          providerGrantId,
+          usesRemoteGrantId ? 1 : 0,
+          grantMetadataPath,
+          grantMetadataPath,
+          providerGrantId,
+          removalFreshAfter
         ]),
     expectedCredentials,
     connectionExisted ? 1 : 0,
-    tiktokLifecycleFreshAfter
+    removalFreshAfter
   );
 };
 
@@ -395,7 +415,6 @@ const activeStoredMetaGrants = async (
   context: DiscoveryContext,
   platform: MetaPlatform
 ): Promise<ActiveStoredMetaGrant[]> => {
-  const staleRemovalBefore = Date.now() - 15 * 60 * 1000;
   return await context.db
     .select({
       credentialsEncrypted: socialConnections.credentialsEncrypted,
@@ -406,11 +425,69 @@ const activeStoredMetaGrants = async (
     .where(
       and(
         eq(socialConnections.provider, platform),
-        inArray(socialConnections.status, ["connected", "limited"]),
-        sql`(${socialConnections.lastErrorCode} IS NULL OR (${socialConnections.lastErrorCode} <> 'account_deletion_revoke_completed' AND ((${socialConnections.lastErrorCode} <> 'disconnecting' AND ${socialConnections.lastErrorCode} NOT LIKE 'disconnecting:%' AND ${socialConnections.lastErrorCode} NOT LIKE 'account_deletion_revoke_started%') OR ${socialConnections.updatedAt} < ${staleRemovalBefore})))`,
+        inArray(socialConnections.status, [
+          "connected",
+          "limited",
+          "reauth_required"
+        ]),
         sql`EXISTS (SELECT 1 FROM workspaces INNER JOIN users ON users.id = ${socialConnections.connectedByUserId} WHERE workspaces.id = ${socialConnections.workspaceId} AND workspaces.status = 'active' AND users.status = 'active')`
       )
     );
+};
+
+const storedYoutubeGrantMayBeShared = async (
+  context: DiscoveryContext,
+  grantSubject: string
+): Promise<boolean> => {
+  const result = await context.bindings.DB.prepare(
+    "SELECT metadata_json FROM social_connections WHERE provider = 'youtube' AND status IN ('connected', 'limited', 'reauth_required') AND EXISTS (SELECT 1 FROM workspaces INNER JOIN users ON users.id = social_connections.connected_by_user_id WHERE workspaces.id = social_connections.workspace_id AND workspaces.status = 'active' AND users.status = 'active')"
+  ).all<{ metadata_json: string }>();
+  return result.results.some(row => {
+    try {
+      const metadata = JSON.parse(row.metadata_json) as Record<string, unknown>;
+      return (
+        typeof metadata.grantSubject !== "string" ||
+        metadata.grantSubject.length === 0 ||
+        metadata.grantSubject === grantSubject
+      );
+    } catch {
+      return true;
+    }
+  });
+};
+
+const revokeYoutubeAfterFailure = async (
+  context: DiscoveryContext,
+  credentials: StoredCredentials,
+  grantSubject: string | null,
+  originalError: Error
+): Promise<never> => {
+  if (grantSubject === null) {
+    throw originalError;
+  }
+  let sharedGrant: boolean;
+  try {
+    sharedGrant = await storedYoutubeGrantMayBeShared(context, grantSubject);
+  } catch (inspectionError) {
+    throw new AggregateError(
+      [
+        originalError,
+        inspectionError instanceof Error
+          ? inspectionError
+          : new Error("Stored YouTube grants could not be inspected.")
+      ],
+      "YouTube authorization failed and the new grant could not be safely distinguished from stored grants."
+    );
+  }
+  if (sharedGrant) {
+    throw originalError;
+  }
+  return await revokeAfterFailure(
+    context.bindings,
+    "youtube",
+    credentials,
+    originalError
+  );
 };
 
 const facebookGrantUserId = (metadataJson: string): string | null => {
@@ -589,6 +666,17 @@ const connectFacebook = async (context: DiscoveryContext): Promise<number> => {
         )
       );
     grantUserId = grantUser.id;
+    const grantedScopes = await fetchMetaGrantedScopes(
+      context.bindings,
+      "facebook",
+      longToken.access_token
+    );
+    if (!hasEveryScope(grantedScopes, facebookScopes)) {
+      throw new ProviderError({
+        code: "facebook_scope_missing",
+        message: "Grant every requested Facebook permission before connecting."
+      });
+    }
 
     const pagesSchema = z.object({
       data: z.array(
@@ -654,7 +742,7 @@ const connectFacebook = async (context: DiscoveryContext): Promise<number> => {
         metadata: { grantUserId: grantUser.id, tasks },
         platform: "facebook" as const,
         remoteAccountId: page.id,
-        scopes: [...facebookScopes],
+        scopes: grantedScopes,
         status: canPublish ? ("connected" as const) : ("limited" as const),
         workspaceId: context.workspaceId
       };
@@ -729,7 +817,6 @@ const connectInstagram = async (context: DiscoveryContext): Promise<number> => {
     const shortToken = z
       .object({
         access_token: z.string().min(1),
-        permissions: z.string().optional(),
         user_id: z.union([z.string(), z.number()]).transform(String)
       })
       .parse(shortTokenResponse);
@@ -756,6 +843,17 @@ const connectInstagram = async (context: DiscoveryContext): Promise<number> => {
       refreshToken: longToken.refresh_token,
       tokenType: longToken.token_type
     });
+    const grantedScopes = await fetchMetaGrantedScopes(
+      context.bindings,
+      "instagram",
+      longToken.access_token
+    );
+    if (!hasEveryScope(grantedScopes, instagramScopes)) {
+      throw new ProviderError({
+        code: "instagram_scope_missing",
+        message: "Grant every requested Instagram permission before connecting."
+      });
+    }
     const profileUrl = new URL(
       "https://graph.instagram.com/" +
         context.bindings.META_GRAPH_VERSION +
@@ -805,9 +903,7 @@ const connectInstagram = async (context: DiscoveryContext): Promise<number> => {
         metadata: { accountType: profile.account_type ?? "professional" },
         platform: "instagram",
         remoteAccountId: remoteId,
-        scopes: shortToken.permissions?.split(",").filter(Boolean) ?? [
-          ...instagramScopes
-        ],
+        scopes: grantedScopes,
         workspaceId: context.workspaceId
       }
     ]);
@@ -832,6 +928,7 @@ const connectInstagram = async (context: DiscoveryContext): Promise<number> => {
 
 const connectYoutube = async (context: DiscoveryContext): Promise<number> => {
   let grantCredentials: StoredCredentials | null = null;
+  let grantSubject: string | null = null;
   try {
     const tokenResponse = await providerJson<unknown>(
       "https://oauth2.googleapis.com/token",
@@ -865,6 +962,31 @@ const connectYoutube = async (context: DiscoveryContext): Promise<number> => {
       refreshToken: token.refresh_token,
       tokenType: token.token_type
     });
+    const grantedScopes = token.scope?.split(/\s+/).filter(Boolean) ?? [];
+    const grantedScopeSet = new Set(grantedScopes);
+    if (!grantedScopeSet.has("openid")) {
+      throw new ProviderError({
+        code: "youtube_scope_missing",
+        message: "Grant every requested YouTube permission before connecting."
+      });
+    }
+    const grantIdentity = z.object({ sub: z.string().min(1).max(255) }).parse(
+      await providerJson<unknown>(
+        "https://openidconnect.googleapis.com/v1/userinfo",
+        {
+          headers: { Authorization: "Bearer " + token.access_token },
+          method: "GET"
+        },
+        { operation: "youtube_grant_identity" }
+      )
+    );
+    grantSubject = grantIdentity.sub;
+    if (youtubeScopes.some(scope => !grantedScopeSet.has(scope))) {
+      throw new ProviderError({
+        code: "youtube_scope_missing",
+        message: "Grant every requested YouTube permission before connecting."
+      });
+    }
     const channels = z
       .object({
         items: z.array(
@@ -907,16 +1029,21 @@ const connectYoutube = async (context: DiscoveryContext): Promise<number> => {
       }),
       displayName: channel.snippet.title,
       expiresAt,
-      metadata: { customUrl: channel.snippet.customUrl ?? null },
+      metadata: {
+        customUrl: channel.snippet.customUrl ?? null,
+        grantSubject: grantIdentity.sub
+      },
       platform: "youtube" as const,
       remoteAccountId: channel.id,
-      scopes: token.scope?.split(" ").filter(Boolean) ?? [...youtubeScopes],
+      scopes: grantedScopes,
       workspaceId: context.workspaceId
     }));
     if (connections.length === 0) {
       const credentials = grantCredentials;
       grantCredentials = null;
-      await revokeProviderGrant(context.bindings, "youtube", credentials);
+      if (!(await storedYoutubeGrantMayBeShared(context, grantIdentity.sub))) {
+        await revokeProviderGrant(context.bindings, "youtube", credentials);
+      }
       return 0;
     }
 
@@ -930,10 +1057,10 @@ const connectYoutube = async (context: DiscoveryContext): Promise<number> => {
     if (grantCredentials === null) {
       throw failure;
     }
-    return await revokeAfterFailure(
-      context.bindings,
-      "youtube",
+    return await revokeYoutubeAfterFailure(
+      context,
       grantCredentials,
+      grantSubject,
       failure
     );
   }
@@ -1083,7 +1210,7 @@ const connectTiktok = async (context: DiscoveryContext): Promise<number> => {
         throw failure;
       }
       const activeGrant = await context.bindings.DB.prepare(
-        "SELECT 1 AS active FROM social_connections INNER JOIN workspaces ON workspaces.id = social_connections.workspace_id INNER JOIN users ON users.id = social_connections.connected_by_user_id WHERE social_connections.provider = 'tiktok' AND social_connections.remote_account_id = ? AND social_connections.status IN ('connected', 'limited') AND (social_connections.last_error_code IS NULL OR (social_connections.last_error_code <> 'account_deletion_revoke_completed' AND ((social_connections.last_error_code NOT LIKE 'disconnecting:%' AND social_connections.last_error_code NOT LIKE 'account_deletion_revoke_started:%') OR social_connections.updated_at < ?))) AND workspaces.status = 'active' AND users.status = 'active' LIMIT 1"
+        "SELECT 1 AS active FROM social_connections INNER JOIN workspaces ON workspaces.id = social_connections.workspace_id INNER JOIN users ON users.id = social_connections.connected_by_user_id WHERE social_connections.provider = 'tiktok' AND social_connections.remote_account_id = ? AND social_connections.status IN ('connected', 'limited', 'reauth_required') AND (social_connections.last_error_code IS NULL OR (social_connections.last_error_code <> 'account_deletion_revoke_completed' AND ((social_connections.last_error_code NOT LIKE 'disconnecting:%' AND social_connections.last_error_code NOT LIKE 'account_deletion_revoke_started:%') OR social_connections.updated_at < ?))) AND workspaces.status = 'active' AND users.status = 'active' LIMIT 1"
       )
         .bind(discoveredRemoteAccountId, staleDisconnectBefore)
         .first<{ active: number }>();

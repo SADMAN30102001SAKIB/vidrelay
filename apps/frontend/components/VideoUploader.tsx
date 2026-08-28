@@ -29,6 +29,7 @@ type UploadPhase =
   | "cancelling"
   | "error"
   | "idle"
+  | "preparing"
   | "ready"
   | "selected"
   | "uploading"
@@ -80,6 +81,10 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
   const abortRef = useRef<AbortController | null>(null);
   const activeSessionRef = useRef<PersistedUpload | null>(null);
   const cancelRequestedRef = useRef(false);
+  const previewUrlRef = useRef<string | null>(null);
+  const selectedFingerprintRef = useRef<string | null>(null);
+  const selectionReadyRef = useRef(false);
+  const selectionVersionRef = useRef(0);
   const uploadInFlightRef = useRef(false);
   const [file, setFile] = useState<File | null>(null);
   const [facts, setFacts] = useState<BrowserMediaFacts | null>(null);
@@ -87,26 +92,31 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
   const [session, setSession] = useState<PersistedUpload | null>(null);
   const [serverUpload, setServerUpload] = useState<Upload | null>(null);
   const [phase, setPhase] = useState<UploadPhase>("idle");
+  const [selectionReady, setSelectionReady] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    return () => {
+      selectionVersionRef.current += 1;
       abortRef.current?.abort();
-      if (previewUrl !== null) {
-        URL.revokeObjectURL(previewUrl);
+      if (previewUrlRef.current !== null) {
+        URL.revokeObjectURL(previewUrlRef.current);
       }
-    },
-    [previewUrl]
-  );
+    };
+  }, []);
 
   const clearSelection = () => {
+    selectionVersionRef.current += 1;
     activeSessionRef.current = null;
+    selectedFingerprintRef.current = null;
+    selectionReadyRef.current = false;
     cancelRequestedRef.current = false;
-    if (previewUrl !== null) {
-      URL.revokeObjectURL(previewUrl);
+    if (previewUrlRef.current !== null) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
     }
     setFile(null);
     setFacts(null);
@@ -114,6 +124,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
     setSession(null);
     setServerUpload(null);
     setPhase("idle");
+    setSelectionReady(false);
     setProgress(0);
     setError(null);
     setWarnings([]);
@@ -125,15 +136,24 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
   };
 
   const chooseFile = async (nextFile: File) => {
+    const selectionVersion = selectionVersionRef.current + 1;
+    selectionVersionRef.current = selectionVersion;
+    const isCurrentSelection = (): boolean =>
+      selectionVersionRef.current === selectionVersion;
     activeSessionRef.current = null;
+    selectedFingerprintRef.current = null;
+    selectionReadyRef.current = false;
+    setSelectionReady(false);
+    setPhase("preparing");
     setError(null);
     setWarnings([]);
     setServerUpload(null);
     onUploadChange(null);
-    if (previewUrl !== null) {
-      URL.revokeObjectURL(previewUrl);
+    if (previewUrlRef.current !== null) {
+      URL.revokeObjectURL(previewUrlRef.current);
     }
     const nextUrl = URL.createObjectURL(nextFile);
+    previewUrlRef.current = nextUrl;
     setPreviewUrl(nextUrl);
     setFile(nextFile);
     setFacts(null);
@@ -153,6 +173,9 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
         );
       }
       const nextFacts = await inspectVideo(nextUrl);
+      if (!isCurrentSelection()) {
+        return;
+      }
       const validationErrors: string[] = [];
       if (
         nextFacts.duration < profile.durationSeconds.min ||
@@ -180,16 +203,26 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
       }
       setFacts(nextFacts);
       setWarnings([
-        "Your browser can check the container, dimensions, and duration. VidRelay verifies H.264 video, AAC audio, frame rate, and file integrity after upload."
+        "Your browser checks basic dimensions and duration. After upload, VidRelay runs a bounded MP4 structure, codec, frame-rate, and metadata preflight; each provider performs the final media decode."
       ]);
 
+      const fingerprint = await fileFingerprint(nextFile);
+      if (!isCurrentSelection()) {
+        return;
+      }
+      selectedFingerprintRef.current = fingerprint;
       const persisted = readPersistedUpload();
-      if (persisted?.fingerprint === fileFingerprint(nextFile)) {
+      if (persisted?.fingerprint === fingerprint) {
         try {
           const body = await apiRequest<{ upload: Upload }>(
             `/api/uploads/${persisted.id}`
           );
+          if (!isCurrentSelection()) {
+            return;
+          }
           if (body.upload.status === "ready") {
+            selectionReadyRef.current = true;
+            setSelectionReady(true);
             activeSessionRef.current = persisted;
             setSession(persisted);
             setServerUpload(body.upload);
@@ -202,6 +235,8 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
             body.upload.status === "uploading" ||
             body.upload.status === "verifying"
           ) {
+            selectionReadyRef.current = true;
+            setSelectionReady(true);
             activeSessionRef.current = persisted;
             setSession(persisted);
             setServerUpload(body.upload);
@@ -215,13 +250,24 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
             return;
           }
         } catch {
+          if (!isCurrentSelection()) {
+            return;
+          }
           activeSessionRef.current = null;
           persistUpload(null);
         }
       }
+      if (!isCurrentSelection()) {
+        return;
+      }
+      selectionReadyRef.current = true;
+      setSelectionReady(true);
       setSession(null);
       setPhase("selected");
     } catch (caught) {
+      if (!isCurrentSelection()) {
+        return;
+      }
       setPhase("error");
       setError(errorMessage(caught));
     }
@@ -235,7 +281,14 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
   };
 
   const upload = async () => {
-    if (uploadInFlightRef.current || file === null || facts === null) {
+    const selectedFingerprint = selectedFingerprintRef.current;
+    if (
+      uploadInFlightRef.current ||
+      !selectionReadyRef.current ||
+      selectedFingerprint === null ||
+      file === null ||
+      facts === null
+    ) {
       return;
     }
     uploadInFlightRef.current = true;
@@ -262,7 +315,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
         });
         workingSession = {
           completed: [],
-          fingerprint: fileFingerprint(file),
+          fingerprint: selectedFingerprint,
           id: body.upload.id,
           multipart: body.multipart
         };
@@ -352,9 +405,16 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
             updateProgress();
           }
         };
-        await Promise.all(
-          Array.from({ length: Math.min(3, batch.length) }, () => worker())
+        const workers = Array.from({ length: Math.min(3, batch.length) }, () =>
+          worker()
         );
+        try {
+          await Promise.all(workers);
+        } catch (workerError) {
+          controller.abort();
+          await Promise.allSettled(workers);
+          throw workerError;
+        }
       }
 
       setPhase("verifying");
@@ -377,6 +437,9 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
         persistUpload(null);
         onUploadChange(completedBody.upload);
       } else if (completedBody.upload.status === "rejected") {
+        activeSessionRef.current = null;
+        setSession(null);
+        persistUpload(null);
         setPhase("error");
         setError(
           completedBody.upload.validation.errors.join(" ") ||
@@ -385,7 +448,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
       } else {
         setPhase("error");
         setError(
-          "Server verification is still pending. Resume to check the upload again."
+          "Server media preflight is still pending. Resume to check the upload again."
         );
       }
     } catch (caught) {
@@ -426,6 +489,7 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
     if (cancelRequestedRef.current || phase === "cancelling") {
       return;
     }
+    selectionVersionRef.current += 1;
     cancelRequestedRef.current = true;
     setPhase("cancelling");
     setError(null);
@@ -544,6 +608,11 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
         </Notice>
       ))}
       {error === null ? null : <Notice tone="danger">{error}</Notice>}
+      {phase === "preparing" ? (
+        <Notice tone="info">
+          Checking this file and looking for a resumable upload…
+        </Notice>
+      ) : null}
       {phase === "cancelling" ||
       phase === "uploading" ||
       phase === "verifying" ||
@@ -554,9 +623,9 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
               {phase === "cancelling"
                 ? "Cancelling upload…"
                 : phase === "verifying"
-                  ? "Verifying media…"
+                  ? "Running media preflight…"
                   : phase === "ready"
-                    ? "Media verified"
+                    ? "Media preflight passed"
                     : "Uploading parts…"}
             </span>
             <strong>{progress}%</strong>
@@ -574,24 +643,31 @@ export function VideoUploader({ config, onUploadChange }: VideoUploaderProps) {
       ) : null}
       {phase === "ready" ? (
         <Notice tone="success">
-          Server verification passed. This upload is ready to publish.
+          Server structural and metadata preflight passed. Provider processing
+          remains the final media validation.
         </Notice>
       ) : null}
       <div className="button-row">
-        {facts !== null && phase !== "ready" && phase !== "verifying" ? (
+        {facts !== null &&
+        (selectionReady || phase === "preparing") &&
+        phase !== "ready" &&
+        phase !== "verifying" &&
+        serverUpload?.status !== "rejected" ? (
           <Button
             busy={phase === "uploading"}
-            disabled={phase === "cancelling"}
+            disabled={phase === "cancelling" || !selectionReady}
             onClick={() => void upload()}
             type="button">
-            {phase === "error" || session !== null ? (
+            {session !== null ? (
               <RefreshCw aria-hidden="true" size={16} />
             ) : (
               <FileVideo aria-hidden="true" size={16} />
             )}
-            {phase === "error" || session !== null
-              ? "Resume upload"
-              : "Upload and verify"}
+            {!selectionReady
+              ? "Preparing upload"
+              : session !== null
+                ? "Resume upload"
+                : "Upload and preflight"}
           </Button>
         ) : null}
         <Button

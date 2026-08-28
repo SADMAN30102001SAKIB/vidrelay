@@ -7,12 +7,12 @@ verified for the actual production application.
 
 The callback base is `PUBLIC_API_ORIGIN`, with no trailing path:
 
-| Platform  | Redirect URI path               | Requested scopes                                                 |
-| --------- | ------------------------------- | ---------------------------------------------------------------- |
-| Facebook  | `/api/oauth/facebook/callback`  | `pages_show_list`, `pages_read_engagement`, `pages_manage_posts` |
-| Instagram | `/api/oauth/instagram/callback` | `instagram_business_basic`, `instagram_business_content_publish` |
-| YouTube   | `/api/oauth/youtube/callback`   | `https://www.googleapis.com/auth/youtube.upload`                 |
-| TikTok    | `/api/oauth/tiktok/callback`    | `user.info.basic`, `video.publish`                               |
+| Platform  | Redirect URI path               | Requested scopes                                                                                               |
+| --------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Facebook  | `/api/oauth/facebook/callback`  | `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`                                               |
+| Instagram | `/api/oauth/instagram/callback` | `instagram_business_basic`, `instagram_business_content_publish`                                               |
+| YouTube   | `/api/oauth/youtube/callback`   | `openid`, `https://www.googleapis.com/auth/youtube.upload`, `https://www.googleapis.com/auth/youtube.readonly` |
+| TikTok    | `/api/oauth/tiktok/callback`    | `user.info.basic`, `video.publish`                                                                             |
 
 For local provider testing, prepend `http://localhost:4000`. For production,
 prepend the exact deployed API origin configured in `PUBLIC_API_ORIGIN`. Register
@@ -52,9 +52,10 @@ withdrawn or an incident occurs, disable the capability before investigating.
 5. Test first with app-role/test users and a non-critical Page.
 
 The connection discovery records Pages and marks them publishable only when Meta
-returns a content-management task, including the New Pages Experience
-`PROFILE_PLUS_*` task family. It does not connect a personal Facebook profile.
-Confirm the review result for all requested permissions before changing
+reports every required scope and returns a content-management task, including the
+New Pages Experience `PROFILE_PLUS_*` task family. Recheck reads the live granted
+permission set again. It does not connect a personal Facebook profile. Confirm
+the review result for all requested permissions before changing
 `FACEBOOK_CAPABILITY`.
 
 References: [Meta Reels publishing](https://developers.facebook.com/docs/video-api/guides/reels-publishing/),
@@ -76,7 +77,8 @@ upload workaround. The customer must authorize an eligible Professional account.
    returned permalink with an app-role/test account.
 
 Do not advertise personal Instagram support. Confirm the production access level
-before changing `INSTAGRAM_CAPABILITY`.
+before changing `INSTAGRAM_CAPABILITY`. OAuth and recheck fail closed unless Meta
+reports both required Instagram permissions as granted.
 
 References: [Instagram content publishing](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing/),
 [Meta's official Instagram API collection](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api).
@@ -89,7 +91,11 @@ References: [Instagram content publishing](https://developers.facebook.com/docs/
    and a Web application OAuth client with the exact callback.
 3. Add the generated client ID/secret as Worker secrets. VidRelay requests offline
    access and uses PKCE so it can resume uploads without exposing credentials to
-   the browser.
+   the browser. It requires `youtube.upload` for uploads and `youtube.readonly` for
+   channel discovery and processing checks, and rejects incomplete granular grants.
+   The `openid` scope is used only to store Google's stable subject identifier so
+   disconnect and account deletion do not revoke a grant still used by another
+   active workspace; VidRelay does not request email or profile data through it.
 4. Complete Google's OAuth verification when the consent configuration requires
    it, and complete the YouTube API compliance audit required to remove upload
    restrictions.
@@ -139,10 +145,14 @@ References: [TikTok Content Posting API setup](https://developers.tiktok.com/doc
 - The capability remains gated until approval and a production smoke test are
   recorded with date, app/project ID, reviewer, and result.
 
-The API exposes signed Meta and TikTok webhook routes under `/api/webhooks`.
-Register them only for an enabled provider and set the corresponding
-verification/signing secret. The current Meta POST callback verifies, deduplicates,
-and records deliveries as ignored; it does **not** drive destination status, so
+The API exposes provider-specific Meta callbacks at
+`/api/webhooks/meta/facebook` and `/api/webhooks/meta/instagram`, plus the TikTok
+callback at `/api/webhooks/tiktok`. Register only the callback for an enabled
+provider. Both Meta callbacks use `META_WEBHOOK_VERIFY_TOKEN` for the GET
+challenge; Facebook POST signatures use `META_APP_SECRET`, while Instagram POST
+signatures use `INSTAGRAM_APP_SECRET`. The fixed callback path selects the secret
+before any untrusted payload is parsed. Meta POST callbacks verify, deduplicate,
+and record deliveries as ignored; they do **not** drive destination status, so
 Workflow polling remains authoritative for Facebook and Instagram. TikTok status
 events do update matching destinations. Run provider-console delivery tests and
-the end-to-end status path before relying on either integration.
+the end-to-end status path before relying on any integration.

@@ -1,6 +1,6 @@
 "use client";
 
-import { platformLabels, platforms } from "@vidrelay/shared";
+import { firstReleasePlatforms, platformLabels } from "@vidrelay/shared";
 
 import type { Capability, Platform } from "@vidrelay/shared";
 
@@ -29,7 +29,7 @@ export function CapabilityOverview() {
         </Notice>
       )}
       <div className="connection-grid">
-        {platforms.map(platform => {
+        {firstReleasePlatforms.map(platform => {
           const capability =
             config?.capabilities.find(item => item.platform === platform) ??
             fallbackCapability(platform);

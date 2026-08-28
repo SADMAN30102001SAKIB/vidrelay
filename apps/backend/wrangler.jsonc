@@ -13,7 +13,7 @@
   },
   "vars": {
     "APP_ENV": "development",
-    "APP_ORIGINS": "http://localhost:3000",
+    "APP_ORIGINS": "http://localhost:3000,http://127.0.0.1:3000",
     "PUBLIC_APP_ORIGIN": "http://localhost:3000",
     "PUBLIC_API_ORIGIN": "http://localhost:4000",
     "ALLOW_SIGNUPS": "true",

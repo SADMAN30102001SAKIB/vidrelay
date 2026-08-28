@@ -1,0 +1,1094 @@
+{
+  "finding_counts": {
+    "apps/backend/scripts/rehearse-migrations.ts": {
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/index.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/cookies.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mappers.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/media-leases.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mp4.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "complexity_high": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/request-body.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/safe-logger.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/middleware/auth.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/middleware/security.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "apps/backend/src/platforms/credentials.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/platforms/http.ts": {
+      "complexity_moderate": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/platforms/revoke.ts": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/facebook.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/instagram.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/repository.ts": {
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/runtime.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "apps/backend/src/publishing/workflow.ts": {
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/account.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/auth.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "apps/backend/src/routes/connections.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/media.ts": {
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/posts.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "apps/backend/src/routes/uploads.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 5
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/webhooks.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/connections/page.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/create/page.tsx": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/page.tsx": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/frontend/app/app/posts/page.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/settings/page.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "apps/frontend/app/auth/login/page.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/frontend/app/auth/signup/page.tsx": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/AppShell.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/frontend/components/DataDeletionLookup.tsx": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/VideoUploader.tsx": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/ui.tsx": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/frontend/lib/format.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/lib/upload.ts": {
+      "crap_moderate": {
+        "count": 2
+      }
+    }
+  },
+  "identity_finding_counts": {
+    "apps/backend/scripts/rehearse-migrations.ts\u0000collectRows": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/scripts/rehearse-migrations.ts\u0000main": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/scripts/rehearse-migrations.ts\u0000runLocalWrangler": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/scripts/rehearse-migrations.ts\u0000verifyPopulatedData": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/index.ts\u0000runMaintenance": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/cookies.ts\u0000readCookie": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mappers.ts\u0000toDestination": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mappers.ts\u0000validationFrom": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/media-leases.ts\u0000createMediaLease": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mp4.ts\u0000boxAt": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mp4.ts\u0000findTopLevel": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mp4.ts\u0000inspectMp4": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/mp4.ts\u0000sampleCodec": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/request-body.ts\u0000readLimitedText": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/lib/safe-logger.ts\u0000sanitize": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/middleware/auth.ts\u0000resolveAuth": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/middleware/security.ts\u0000corsAndCsrf": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts\u0000connectInstagram": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts\u0000connectTiktok": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts\u0000connectYoutube": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts\u0000connectionStatement": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts\u0000persistConnections": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/oauth/providers.ts\u0000storedMetaGrantMayBeShared": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/platforms/credentials.ts\u0000ensureFreshCredentials": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/platforms/http.ts\u0000providerErrorDetails": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/platforms/http.ts\u0000providerJson": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/platforms/revoke.ts\u0000revokeProviderGrant": {
+      "complexity_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/facebook.ts\u0000<arrow>": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/facebook.ts\u0000facebookStatus": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/facebook.ts\u0000finish": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/facebook.ts\u0000publishFacebook": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/instagram.ts\u0000publishInstagram": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/repository.ts\u0000finishDestination": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/repository.ts\u0000recoverStaleDestinations": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/repository.ts\u0000updateDestination": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/runtime.ts\u0000currentContext": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000apiError": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000confirmPublish": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000publishTikTok": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000requestTikTok": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000status": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000validateCreatorInfo": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/tiktok.ts\u0000validateDirectPostCapability": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/workflow.ts\u0000<arrow>": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/workflow.ts\u0000capabilityFailure": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/workflow.ts\u0000dispatch": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/workflow.ts\u0000failureState": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/workflow.ts\u0000run": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts\u0000<arrow>": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts\u0000probeUpload": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts\u0000publishYoutube": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts\u0000session": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts\u0000youtubeError": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/publishing/youtube.ts\u0000youtubeVideoStatus": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/account.ts\u0000<arrow>": {
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/account.ts\u0000abortIncompleteUpload": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/account.ts\u0000failureMessage": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/account.ts\u0000processDeletionRequests": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/account.ts\u0000revokeConnection": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/auth.ts\u0000<arrow>": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/auth.ts\u0000consumeAttempt": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/auth.ts\u0000createCustomerAccount": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/connections.ts\u0000<arrow>": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/connections.ts\u0000metadataObject": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/connections.ts\u0000safeReturnTo": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/media.ts\u0000<arrow>": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/media.ts\u0000parseRange": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/posts.ts\u0000<arrow>": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "apps/backend/src/routes/posts.ts\u0000decodeCursor": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/posts.ts\u0000enforceCapability": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/uploads.ts\u0000<arrow>": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 4
+      }
+    },
+    "apps/backend/src/routes/uploads.ts\u0000abandonMultipartStart": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/uploads.ts\u0000cleanupUploads": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/uploads.ts\u0000deleteStoredObject": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/uploads.ts\u0000finalizeInspection": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/webhooks.ts\u0000<arrow>": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/webhooks.ts\u0000authorizedAtFromMetadata": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/webhooks.ts\u0000recordMetaWebhook": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/backend/src/routes/webhooks.ts\u0000verifyMetaChallenge": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/connections/page.tsx\u0000<arrow>": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/connections/page.tsx\u0000ConnectionsContent": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/create/page.tsx\u0000<arrow>": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/create/page.tsx\u0000CreatePostPage": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/create/page.tsx\u0000submit": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/create/page.tsx\u0000togglePlatform": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/page.tsx\u0000DashboardPage": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx\u0000<arrow>": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx\u0000PostDetailContent": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx\u0000confirmPublished": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx\u0000load": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx\u0000loadPreview": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/detail/page.tsx\u0000requestAction": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/posts/page.tsx\u0000PostsPage": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/settings/page.tsx\u0000SettingsContent": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/settings/page.tsx\u0000changePassword": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/settings/page.tsx\u0000requestDeletion": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/settings/page.tsx\u0000revokeSession": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/app/settings/page.tsx\u0000saveProfile": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/auth/login/page.tsx\u0000LoginForm": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/auth/login/page.tsx\u0000safeReturnTo": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/app/auth/signup/page.tsx\u0000SignupPage": {
+      "complexity_moderate": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/AppShell.tsx\u0000<arrow>": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/AppShell.tsx\u0000AppShell": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/DataDeletionLookup.tsx\u0000DataDeletionLookup": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/DataDeletionLookup.tsx\u0000statusMessage": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/VideoUploader.tsx\u0000VideoUploader": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/VideoUploader.tsx\u0000cancel": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/VideoUploader.tsx\u0000chooseFile": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/VideoUploader.tsx\u0000upload": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/ui.tsx\u0000Notice": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/components/ui.tsx\u0000buttonClass": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/lib/format.ts\u0000formatBytes": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/lib/upload.ts\u0000<arrow>": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "apps/frontend/lib/upload.ts\u0000readPersistedUpload": {
+      "crap_moderate": {
+        "count": 1
+      }
+    }
+  },
+  "runtime_coverage_findings": [],
+  "target_keys": [
+    "apps/backend/src/routes/webhooks.ts:complexity",
+    "apps/backend/src/platforms/credentials.ts:complexity",
+    "apps/backend/src/routes/account.ts:complexity",
+    "apps/backend/src/routes/uploads.ts:complexity",
+    "apps/frontend/app/app/create/page.tsx:complexity",
+    "apps/backend/src/routes/connections.ts:complexity",
+    "apps/frontend/app/app/settings/page.tsx:complexity",
+    "apps/backend/src/lib/mp4.ts:complexity",
+    "apps/backend/src/publishing/facebook.ts:complexity",
+    "apps/frontend/components/VideoUploader.tsx:complexity",
+    "apps/frontend/app/app/posts/detail/page.tsx:complexity"
+  ]
+}

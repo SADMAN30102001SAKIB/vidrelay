@@ -1,5 +1,6 @@
 import {
   deleteAccountSchema,
+  deletionStatusLookupSchema,
   retryDeletionSchema,
   type DeletionFailureCode,
   type DeletionPhase,
@@ -24,7 +25,11 @@ import { parseJson } from "../lib/json";
 import { abortR2MultipartUpload } from "../lib/r2-s3";
 import { safeLog } from "../lib/safe-logger";
 import { requireAuth } from "../middleware/auth";
-import { decodeCredentials } from "../platforms/credentials";
+import {
+  decodeCredentials,
+  type StoredCredentials
+} from "../platforms/credentials";
+import { activeGrantSiblingState, providerGrantKey } from "../platforms/grants";
 import { revokeProviderCredentials } from "../platforms/revoke";
 
 const maximumAutomaticDeletionAttempts = 5;
@@ -234,7 +239,7 @@ accountRoutes.post("/deletions/:id/retry", async context => {
       "Operator access is required."
     );
   }
-  await parseJson(context, retryDeletionSchema);
+  const input = await parseJson(context, retryDeletionSchema);
 
   const db = createDb(context.env.DB);
   const [request] = await db
@@ -257,12 +262,57 @@ accountRoutes.post("/deletions/:id/retry", async context => {
     );
   }
 
+  const ambiguousRevocations =
+    request.workspaceId === null
+      ? []
+      : await db
+          .select({ id: socialConnections.id })
+          .from(socialConnections)
+          .where(
+            and(
+              eq(socialConnections.workspaceId, request.workspaceId),
+              sql`${socialConnections.lastErrorCode} LIKE 'account_deletion_revoke_started:%'`
+            )
+          );
+  if (
+    ambiguousRevocations.length > 0 &&
+    input.providerRevocationResolution === undefined
+  ) {
+    throw new AppError(
+      409,
+      "provider_revocation_resolution_required",
+      "Confirm the provider authorization outcome or explicitly retry revocation before rescheduling this deletion."
+    );
+  }
+
   const now = Date.now();
   const auditId = crypto.randomUUID();
-  const results = await context.env.DB.batch([
+  const statements: D1PreparedStatement[] = [];
+  if (
+    request.workspaceId !== null &&
+    input.providerRevocationResolution !== undefined
+  ) {
+    statements.push(
+      context.env.DB.prepare(
+        "UPDATE social_connections SET last_error_code = ?, last_error_message = NULL, updated_at = ? WHERE workspace_id = ? AND last_error_code LIKE 'account_deletion_revoke_started:%' AND EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND workspace_id = social_connections.workspace_id AND status = 'manual_review')"
+      ).bind(
+        input.providerRevocationResolution === "confirmed_revoked"
+          ? "account_deletion_revoke_completed"
+          : "provider_revoke_failed",
+        now,
+        request.workspaceId,
+        request.id
+      )
+    );
+  }
+  const retryResultIndex = statements.length;
+  statements.push(
     context.env.DB.prepare(
-      "UPDATE deletion_requests SET status = 'retry_scheduled', next_attempt_at = ?, failure_code = NULL, last_error = ?, updated_at = ? WHERE id = ? AND status = 'manual_review'"
-    ).bind(now, auditId, now, request.id),
+      "UPDATE deletion_requests SET status = 'retry_scheduled', next_attempt_at = ?, failure_code = NULL, last_error = ?, updated_at = ? WHERE id = ? AND status = 'manual_review' AND NOT EXISTS (SELECT 1 FROM social_connections WHERE workspace_id = deletion_requests.workspace_id AND last_error_code LIKE 'account_deletion_revoke_started:%')"
+    ).bind(now, auditId, now, request.id)
+  );
+  const auditResultIndex = statements.length;
+  statements.push(
     context.env.DB.prepare(
       "INSERT INTO audit_events (id, actor_user_id, workspace_id, action, entity_type, entity_id, metadata_json, created_at) SELECT ?, ?, ?, 'account.deletion_retry_requested', 'deletion_request', ?, ?, ? WHERE EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND status = 'retry_scheduled' AND last_error = ?)"
     ).bind(
@@ -272,20 +322,27 @@ accountRoutes.post("/deletions/:id/retry", async context => {
       request.id,
       JSON.stringify({
         previousAttemptCount: request.attemptCount,
-        previousFailureCode: request.failureCode
+        previousFailureCode: request.failureCode,
+        providerRevocationResolution:
+          input.providerRevocationResolution ?? null,
+        resolvedRevocationCount: ambiguousRevocations.length
       }),
       now,
       request.id,
       auditId
-    ),
+    )
+  );
+  const clearResultIndex = statements.length;
+  statements.push(
     context.env.DB.prepare(
       "UPDATE deletion_requests SET last_error = NULL WHERE id = ? AND status = 'retry_scheduled' AND last_error = ?"
     ).bind(request.id, auditId)
-  ]);
+  );
+  const results = await context.env.DB.batch(statements);
   if (
-    results[0]?.meta.changes !== 1 ||
-    results[1]?.meta.changes !== 1 ||
-    results[2]?.meta.changes !== 1
+    results[retryResultIndex]?.meta.changes !== 1 ||
+    results[auditResultIndex]?.meta.changes !== 1 ||
+    results[clearResultIndex]?.meta.changes !== 1
   ) {
     throw new AppError(
       409,
@@ -311,15 +368,8 @@ accountRoutes.post("/deletions/:id/retry", async context => {
 });
 
 export const deletionStatusRoutes = new Hono<AppEnv>();
-deletionStatusRoutes.get("/:reference", async context => {
-  const reference = context.req.param("reference");
-  if (reference.length < 24 || reference.length > 128) {
-    throw new AppError(
-      404,
-      "deletion_not_found",
-      "The deletion request was not found."
-    );
-  }
+deletionStatusRoutes.post("/", async context => {
+  const { reference } = await parseJson(context, deletionStatusLookupSchema);
   const referenceHash = await sha256Base64Url(reference);
   const [row] = await createDb(context.env.DB)
     .select()
@@ -337,19 +387,27 @@ deletionStatusRoutes.get("/:reference", async context => {
   return context.json({ deletion: deletionView(row) });
 });
 
-const revokeConnection = async (
-  bindings: Bindings,
-  row: typeof socialConnections.$inferSelect,
-  deletingWorkspaceId: string,
-  handledFacebookGrants: Set<string>,
+type SocialConnectionRow = typeof socialConnections.$inferSelect;
+
+interface RevokeConnectionInput {
+  attemptCount: number;
+  bindings: Bindings;
+  deletingWorkspaceId: string;
+  handledGrants: Set<string>;
+  requestId: string;
+  resumeAmbiguous: boolean;
+  revokeIntent: string;
+  row: SocialConnectionRow;
+}
+
+const providerRevocationAlreadyHandled = (row: SocialConnectionRow): boolean =>
+  row.status === "disconnected" ||
+  row.lastErrorCode === "account_deletion_revoke_completed";
+
+const assertUnambiguousRevokeResume = (
+  row: SocialConnectionRow,
   resumeAmbiguous: boolean
-): Promise<void> => {
-  if (row.status === "disconnected") {
-    return;
-  }
-  if (row.lastErrorCode === "account_deletion_revoke_completed") {
-    return;
-  }
+): void => {
   if (
     resumeAmbiguous &&
     row.lastErrorCode?.startsWith("account_deletion_revoke_started")
@@ -360,97 +418,130 @@ const revokeConnection = async (
       false
     );
   }
-  if (row.provider === "tiktok") {
-    const [sharedGrant] = await createDb(bindings.DB)
-      .select({ id: socialConnections.id })
-      .from(socialConnections)
-      .where(
-        and(
-          eq(socialConnections.provider, "tiktok"),
-          eq(socialConnections.remoteAccountId, row.remoteAccountId),
-          inArray(socialConnections.status, [
-            "connected",
-            "limited",
-            "reauth_required"
-          ]),
-          sql`${socialConnections.workspaceId} <> ${deletingWorkspaceId}`,
-          sql`(${socialConnections.lastErrorCode} IS NULL OR (${socialConnections.lastErrorCode} NOT LIKE 'account_deletion_revoke_started%' AND ${socialConnections.lastErrorCode} <> 'account_deletion_revoke_completed' AND ${socialConnections.lastErrorCode} NOT LIKE 'disconnecting:%'))`,
-          sql`EXISTS (SELECT 1 FROM workspaces INNER JOIN users ON users.id = ${socialConnections.connectedByUserId} WHERE workspaces.id = ${socialConnections.workspaceId} AND workspaces.status = 'active' AND users.status = 'active')`
-        )
-      )
-      .limit(1);
-    if (sharedGrant !== undefined) {
-      return;
-    }
-  }
+};
 
+const providerGrantNeedsRevocation = async (
+  input: RevokeConnectionInput,
+  credentials: StoredCredentials
+): Promise<boolean> => {
+  const { bindings, deletingWorkspaceId, handledGrants, row } = input;
+  const grantKey = await providerGrantKey(bindings, row, credentials);
+  if (handledGrants.has(grantKey)) {
+    return false;
+  }
+  handledGrants.add(grantKey);
+  const grantSiblingState = await activeGrantSiblingState(
+    createDb(bindings.DB),
+    bindings,
+    row,
+    credentials,
+    deletingWorkspaceId
+  );
+  if (grantSiblingState === "unknown") {
+    throw new DeletionProcessingFailure(
+      "provider_cleanup_failed",
+      "Shared provider authorization ownership could not be determined safely.",
+      false
+    );
+  }
+  return grantSiblingState === "none";
+};
+
+const claimProviderRevocationOwnership = async (
+  input: RevokeConnectionInput
+): Promise<void> => {
+  const {
+    attemptCount,
+    bindings,
+    deletingWorkspaceId,
+    requestId,
+    revokeIntent,
+    row
+  } = input;
+  const ownership = await bindings.DB.prepare(
+    "UPDATE deletion_requests SET updated_at = ? WHERE id = ? AND workspace_id = ? AND status = 'processing' AND attempt_count = ? AND phase = 'provider_cleanup' AND EXISTS (SELECT 1 FROM social_connections WHERE id = ? AND workspace_id = ? AND credentials_encrypted = ? AND last_error_code = ?)"
+  )
+    .bind(
+      Date.now(),
+      requestId,
+      deletingWorkspaceId,
+      attemptCount,
+      row.id,
+      deletingWorkspaceId,
+      row.credentialsEncrypted,
+      revokeIntent
+    )
+    .run();
+  if (ownership.meta.changes !== 1) {
+    throw new DeletionClaimLostError();
+  }
+};
+
+const isDefinitiveRetryableProviderFailure = (
+  error: unknown
+): error is ProviderError =>
+  error instanceof ProviderError && !error.outcomeUnknown && error.retryable;
+
+const releaseRetryableRevokeIntent = async (
+  input: RevokeConnectionInput
+): Promise<void> => {
+  const {
+    attemptCount,
+    bindings,
+    deletingWorkspaceId,
+    requestId,
+    revokeIntent,
+    row
+  } = input;
+  const releasedIntent = await bindings.DB.prepare(
+    "UPDATE social_connections SET last_error_code = 'provider_revoke_failed', last_error_message = 'Provider revocation was rejected temporarily and will be retried.', updated_at = ? WHERE id = ? AND workspace_id = ? AND credentials_encrypted = ? AND last_error_code = ? AND EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND workspace_id = social_connections.workspace_id AND status = 'processing' AND attempt_count = ? AND phase = 'provider_cleanup')"
+  )
+    .bind(
+      Date.now(),
+      row.id,
+      deletingWorkspaceId,
+      row.credentialsEncrypted,
+      revokeIntent,
+      requestId,
+      attemptCount
+    )
+    .run();
+  if (releasedIntent.meta.changes !== 1) {
+    throw new DeletionClaimLostError();
+  }
+};
+
+const revokeClaimedProviderGrant = async (
+  input: RevokeConnectionInput,
+  credentials: StoredCredentials
+): Promise<void> => {
+  try {
+    await revokeProviderCredentials(input.bindings, input.row, credentials);
+  } catch (error) {
+    if (isDefinitiveRetryableProviderFailure(error)) {
+      await releaseRetryableRevokeIntent(input);
+    }
+    throw error;
+  }
+};
+
+const revokeConnection = async (
+  input: RevokeConnectionInput
+): Promise<void> => {
+  const { bindings, resumeAmbiguous, row } = input;
+  if (providerRevocationAlreadyHandled(row)) {
+    return;
+  }
+  assertUnambiguousRevokeResume(row, resumeAmbiguous);
   const credentials = await decodeCredentials(
     bindings,
     row.credentialsEncrypted
   );
-  if (row.provider === "facebook" && credentials.userAccessToken !== null) {
-    let grantUserId: string | null = null;
-    try {
-      const metadata = JSON.parse(row.metadataJson) as Record<string, unknown>;
-      grantUserId =
-        typeof metadata.grantUserId === "string" &&
-        metadata.grantUserId.length > 0
-          ? metadata.grantUserId
-          : null;
-    } catch {
-      grantUserId = null;
-    }
-    const grantKey =
-      grantUserId === null
-        ? "token:" + (await sha256Base64Url(credentials.userAccessToken))
-        : "user:" + grantUserId;
-    if (handledFacebookGrants.has(grantKey)) {
-      return;
-    }
-    handledFacebookGrants.add(grantKey);
-
-    const siblings = await createDb(bindings.DB)
-      .select({
-        credentialsEncrypted: socialConnections.credentialsEncrypted,
-        metadataJson: socialConnections.metadataJson
-      })
-      .from(socialConnections)
-      .where(
-        and(
-          eq(socialConnections.provider, "facebook"),
-          inArray(socialConnections.status, ["connected", "limited"]),
-          sql`${socialConnections.workspaceId} <> ${deletingWorkspaceId}`,
-          sql`(${socialConnections.lastErrorCode} IS NULL OR (${socialConnections.lastErrorCode} NOT LIKE 'account_deletion_revoke_started%' AND ${socialConnections.lastErrorCode} <> 'account_deletion_revoke_completed' AND ${socialConnections.lastErrorCode} <> 'disconnecting' AND ${socialConnections.lastErrorCode} NOT LIKE 'disconnecting:%'))`,
-          sql`EXISTS (SELECT 1 FROM workspaces INNER JOIN users ON users.id = ${socialConnections.connectedByUserId} WHERE workspaces.id = ${socialConnections.workspaceId} AND workspaces.status = 'active' AND users.status = 'active')`
-        )
-      );
-    for (const sibling of siblings) {
-      try {
-        const siblingMetadata = JSON.parse(sibling.metadataJson) as Record<
-          string,
-          unknown
-        >;
-        if (
-          grantUserId !== null &&
-          siblingMetadata.grantUserId === grantUserId
-        ) {
-          return;
-        }
-        const siblingCredentials = await decodeCredentials(
-          bindings,
-          sibling.credentialsEncrypted
-        );
-        if (
-          siblingCredentials.userAccessToken === credentials.userAccessToken
-        ) {
-          return;
-        }
-      } catch {
-        continue;
-      }
-    }
+  if (!(await providerGrantNeedsRevocation(input, credentials))) {
+    return;
   }
-  await revokeProviderCredentials(bindings, row, credentials);
+  await claimProviderRevocationOwnership(input);
+  await revokeClaimedProviderGrant(input, credentials);
 };
 
 const deleteObjects = async (
@@ -568,6 +659,22 @@ const deletionRetryDelay = (attemptCount: number): number =>
     deletionRetryBaseMs * 2 ** Math.max(0, attemptCount - 1)
   );
 
+const heartbeatDeletionClaim = async (
+  bindings: Bindings,
+  requestId: string,
+  attemptCount: number,
+  phase: DeletionPhase
+): Promise<void> => {
+  const result = await bindings.DB.prepare(
+    "UPDATE deletion_requests SET updated_at = ? WHERE id = ? AND status = 'processing' AND attempt_count = ? AND phase = ?"
+  )
+    .bind(Date.now(), requestId, attemptCount, phase)
+    .run();
+  if (result.meta.changes !== 1) {
+    throw new DeletionClaimLostError();
+  }
+};
+
 const advanceDeletionPhase = async (
   bindings: Bindings,
   requestId: string,
@@ -665,12 +772,16 @@ export const processDeletionRequests = async (
           .select()
           .from(socialConnections)
           .where(eq(socialConnections.workspaceId, request.workspaceId));
-        const handledFacebookGrants = new Set<string>();
+        const handledGrants = new Set<string>();
         for (const connection of connections) {
+          await heartbeatDeletionClaim(
+            bindings,
+            request.id,
+            attemptCount,
+            "provider_cleanup"
+          );
           const revokeIntent =
-            connection.provider === "tiktok"
-              ? "account_deletion_revoke_started:" + crypto.randomUUID()
-              : "account_deletion_revoke_started";
+            "account_deletion_revoke_started:" + crypto.randomUUID();
           if (
             connection.status !== "disconnected" &&
             !connection.lastErrorCode?.startsWith(
@@ -681,7 +792,7 @@ export const processDeletionRequests = async (
             const revokeClaimedAt = Date.now();
             const removalLeaseCutoff = revokeClaimedAt - deletionLeaseMs;
             const intent = await bindings.DB.prepare(
-              "UPDATE social_connections SET last_error_code = ?, last_error_message = NULL, refresh_lease_id = NULL, refresh_lease_expires_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ? AND credentials_encrypted = ? AND status = ? AND (refresh_lease_id IS NULL OR refresh_lease_expires_at IS NULL OR refresh_lease_expires_at < ?) AND (last_error_code IS ? OR last_error_code = ?) AND (provider <> 'tiktok' OR NOT EXISTS (SELECT 1 FROM social_connections AS removing_connection WHERE removing_connection.provider = 'tiktok' AND removing_connection.remote_account_id = social_connections.remote_account_id AND removing_connection.id <> social_connections.id AND (removing_connection.last_error_code LIKE 'disconnecting:%' OR removing_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND removing_connection.updated_at >= ?))"
+              "UPDATE social_connections SET last_error_code = ?, last_error_message = NULL, refresh_lease_id = NULL, refresh_lease_expires_at = NULL, updated_at = ? WHERE id = ? AND workspace_id = ? AND credentials_encrypted = ? AND status = ? AND (refresh_lease_id IS NULL OR (refresh_lease_expires_at IS NOT NULL AND refresh_lease_expires_at < ?)) AND (last_error_code IS ? OR last_error_code = ?) AND (last_error_code IS NULL OR (last_error_code NOT LIKE 'disconnecting:%' AND last_error_code NOT LIKE 'account_deletion_revoke_started%' AND last_error_code <> 'account_deletion_revoke_completed') OR (last_error_code LIKE 'disconnecting:%' AND updated_at < ?)) AND NOT EXISTS (SELECT 1 FROM social_connections AS removing_connection WHERE removing_connection.provider = social_connections.provider AND removing_connection.id <> social_connections.id AND (removing_connection.last_error_code LIKE 'disconnecting:%' OR removing_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND removing_connection.updated_at >= ? AND ((social_connections.provider IN ('instagram', 'tiktok') AND removing_connection.remote_account_id = social_connections.remote_account_id) OR (social_connections.provider = 'facebook' AND (CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantUserId') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantUserId') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantUserId') END = CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantUserId') END)) OR (social_connections.provider = 'youtube' AND (CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantSubject') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantSubject') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantSubject') END = CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantSubject') END)))) AND EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND workspace_id = social_connections.workspace_id AND status = 'processing' AND attempt_count = ? AND phase = 'provider_cleanup')"
             )
               .bind(
                 revokeIntent,
@@ -693,12 +804,21 @@ export const processDeletionRequests = async (
                 revokeClaimedAt,
                 connection.lastErrorCode,
                 connection.lastErrorCode,
-                removalLeaseCutoff
+                removalLeaseCutoff,
+                removalLeaseCutoff,
+                request.id,
+                attemptCount
               )
               .run();
             if (intent.meta.changes !== 1) {
+              await heartbeatDeletionClaim(
+                bindings,
+                request.id,
+                attemptCount,
+                "provider_cleanup"
+              );
               const latest = await bindings.DB.prepare(
-                "SELECT credentials_encrypted, last_error_code, provider, refresh_lease_id, refresh_lease_expires_at, status, CASE WHEN provider = 'tiktok' AND EXISTS (SELECT 1 FROM social_connections AS removing_connection WHERE removing_connection.provider = 'tiktok' AND removing_connection.remote_account_id = social_connections.remote_account_id AND removing_connection.id <> social_connections.id AND (removing_connection.last_error_code LIKE 'disconnecting:%' OR removing_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND removing_connection.updated_at >= ?) THEN 1 ELSE 0 END AS tiktok_removal_locked FROM social_connections WHERE id = ? AND workspace_id = ? LIMIT 1"
+                "SELECT credentials_encrypted, last_error_code, provider, refresh_lease_id, refresh_lease_expires_at, status, updated_at, CASE WHEN EXISTS (SELECT 1 FROM social_connections AS removing_connection WHERE removing_connection.provider = social_connections.provider AND removing_connection.id <> social_connections.id AND (removing_connection.last_error_code LIKE 'disconnecting:%' OR removing_connection.last_error_code LIKE 'account_deletion_revoke_started:%') AND removing_connection.updated_at >= ? AND ((social_connections.provider IN ('instagram', 'tiktok') AND removing_connection.remote_account_id = social_connections.remote_account_id) OR (social_connections.provider = 'facebook' AND (CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantUserId') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantUserId') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantUserId') END = CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantUserId') END)) OR (social_connections.provider = 'youtube' AND (CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantSubject') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantSubject') END IS NULL OR CASE WHEN json_valid(removing_connection.metadata_json) THEN json_extract(removing_connection.metadata_json, '$.grantSubject') END = CASE WHEN json_valid(social_connections.metadata_json) THEN json_extract(social_connections.metadata_json, '$.grantSubject') END)))) THEN 1 ELSE 0 END AS grant_removal_locked FROM social_connections WHERE id = ? AND workspace_id = ? LIMIT 1"
               )
                 .bind(removalLeaseCutoff, connection.id, request.workspaceId)
                 .first<{
@@ -708,26 +828,28 @@ export const processDeletionRequests = async (
                   refresh_lease_expires_at: number | null;
                   refresh_lease_id: string | null;
                   status: string;
-                  tiktok_removal_locked: number;
+                  updated_at: number;
+                  grant_removal_locked: number;
                 }>();
               const liveRefreshLease =
                 latest !== null &&
                 latest.refresh_lease_id !== null &&
                 (latest.refresh_lease_expires_at === null ||
                   latest.refresh_lease_expires_at >= revokeClaimedAt);
-              const unchangedTiktokConnection =
+              const liveRemovalLease =
                 latest !== null &&
-                latest.provider === "tiktok" &&
-                latest.credentials_encrypted ===
-                  connection.credentialsEncrypted &&
-                latest.status === connection.status &&
-                latest.last_error_code === connection.lastErrorCode;
+                latest.updated_at >= removalLeaseCutoff &&
+                (latest.last_error_code?.startsWith("disconnecting:") ===
+                  true ||
+                  latest.last_error_code?.startsWith(
+                    "account_deletion_revoke_started:"
+                  ) === true);
               throw new DeletionProcessingFailure(
                 "provider_cleanup_failed",
                 "Provider cleanup could not be claimed safely.",
                 liveRefreshLease ||
-                  latest?.tiktok_removal_locked === 1 ||
-                  unchangedTiktokConnection
+                  latest?.grant_removal_locked === 1 ||
+                  liveRemovalLease
               );
             }
           }
@@ -737,28 +859,39 @@ export const processDeletionRequests = async (
               "account_deletion_revoke_started"
             ) &&
             connection.lastErrorCode !== "account_deletion_revoke_completed";
-          await revokeConnection(
+          await revokeConnection({
+            attemptCount,
             bindings,
-            connection,
-            request.workspaceId,
-            handledFacebookGrants,
-            !newlyClaimed
-          );
+            deletingWorkspaceId: request.workspaceId,
+            handledGrants,
+            requestId: request.id,
+            resumeAmbiguous: !newlyClaimed,
+            revokeIntent,
+            row: connection
+          });
           if (
             connection.status !== "disconnected" &&
             connection.lastErrorCode !== "account_deletion_revoke_completed"
           ) {
             const completedRevoke = await bindings.DB.prepare(
-              "UPDATE social_connections SET last_error_code = 'account_deletion_revoke_completed', last_error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ? AND status <> 'disconnected' AND last_error_code = ?"
+              "UPDATE social_connections SET last_error_code = 'account_deletion_revoke_completed', last_error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ? AND status <> 'disconnected' AND last_error_code = ? AND EXISTS (SELECT 1 FROM deletion_requests WHERE id = ? AND workspace_id = social_connections.workspace_id AND status = 'processing' AND attempt_count = ? AND phase = 'provider_cleanup')"
             )
               .bind(
                 Date.now(),
                 connection.id,
                 request.workspaceId,
-                revokeIntent
+                revokeIntent,
+                request.id,
+                attemptCount
               )
               .run();
             if (completedRevoke.meta.changes !== 1) {
+              await heartbeatDeletionClaim(
+                bindings,
+                request.id,
+                attemptCount,
+                "provider_cleanup"
+              );
               const latest = await bindings.DB.prepare(
                 "SELECT status, last_error_code FROM social_connections WHERE id = ? AND workspace_id = ? LIMIT 1"
               )
@@ -777,6 +910,12 @@ export const processDeletionRequests = async (
               );
             }
           }
+          await heartbeatDeletionClaim(
+            bindings,
+            request.id,
+            attemptCount,
+            "provider_cleanup"
+          );
         }
         phase = "media_cleanup";
         await advanceDeletionPhase(bindings, request.id, attemptCount, phase);
@@ -853,7 +992,7 @@ export const processDeletionRequests = async (
         error instanceof DeletionProcessingFailure
           ? error.retryable
           : error instanceof ProviderError
-            ? error.retryable || error.code === "reauth_required"
+            ? !error.outcomeUnknown && error.retryable
             : true;
       const terminal =
         !retryable || attemptCount >= maximumAutomaticDeletionAttempts;

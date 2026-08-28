@@ -10,6 +10,36 @@ import {
 
 import type { Bindings } from "../env";
 
+const supportedModes: Record<Platform, ReadonlySet<CapabilityMode>> = {
+  facebook: new Set([
+    "disabled",
+    "development_only",
+    "review_pending",
+    "direct_publish"
+  ]),
+  instagram: new Set([
+    "disabled",
+    "development_only",
+    "review_pending",
+    "direct_publish"
+  ]),
+  tiktok: new Set([
+    "disabled",
+    "development_only",
+    "review_pending",
+    "inbox_only",
+    "private_only",
+    "direct_publish"
+  ]),
+  youtube: new Set([
+    "disabled",
+    "development_only",
+    "review_pending",
+    "private_only",
+    "direct_publish"
+  ])
+};
+
 const configuredFor = (bindings: Bindings, platform: Platform): boolean => {
   if (platform === "facebook") {
     return Boolean(bindings.META_APP_ID && bindings.META_APP_SECRET);
@@ -37,7 +67,9 @@ const configuredMode = (
           ? bindings.YOUTUBE_CAPABILITY
           : bindings.TIKTOK_CAPABILITY;
   const parsed = capabilityModeSchema.safeParse(raw);
-  return parsed.success ? parsed.data : "disabled";
+  return parsed.success && supportedModes[platform].has(parsed.data)
+    ? parsed.data
+    : "disabled";
 };
 
 const capabilityMessage = (

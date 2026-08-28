@@ -1,6 +1,6 @@
 "use client";
 
-import { platformLabels, platforms } from "@vidrelay/shared";
+import { firstReleasePlatforms, platformLabels } from "@vidrelay/shared";
 import { ExternalLink, RefreshCw, Unplug } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -17,7 +17,7 @@ import {
   PlatformMark,
   StatusBadge
 } from "@/components/ui";
-import { apiRequest, apiUrl, errorMessage } from "@/lib/api";
+import { ApiClientError, apiRequest, apiUrl, errorMessage } from "@/lib/api";
 import { capabilityStatusView, connectionStatusView } from "@/lib/status";
 import { useSession } from "@/providers/SessionProvider";
 
@@ -41,6 +41,36 @@ const oauthMessages: Record<
   no_eligible_accounts: {
     copy: "Authorization succeeded, but no eligible publishing account was returned.",
     tone: "warning"
+  }
+};
+
+const supportsLocalOnlyRemoval = (error: unknown): error is ApiClientError =>
+  error instanceof ApiClientError &&
+  [
+    "provider_revocation_unconfirmed",
+    "provider_grant_identity_unknown"
+  ].includes(error.code);
+
+const removeConnectionCredentials = async (
+  connection: Connection
+): Promise<void> => {
+  try {
+    await apiRequest<unknown>(`/api/connections/${connection.id}`, {
+      method: "DELETE"
+    });
+  } catch (error) {
+    if (
+      !supportsLocalOnlyRemoval(error) ||
+      !window.confirm(
+        `${error.message}\n\nRemove VidRelay's stored credentials anyway? You may still need to remove VidRelay from the provider's connected-app settings.`
+      )
+    ) {
+      throw error;
+    }
+    await apiRequest<unknown>(
+      `/api/connections/${connection.id}?localOnly=true`,
+      { method: "DELETE" }
+    );
   }
 };
 
@@ -131,9 +161,7 @@ function ConnectionsContent() {
     setActingId(connection.id);
     setError(null);
     try {
-      await apiRequest<unknown>(`/api/connections/${connection.id}`, {
-        method: "DELETE"
-      });
+      await removeConnectionCredentials(connection);
       await load();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -179,7 +207,7 @@ function ConnectionsContent() {
       {error === null ? null : <Notice tone="danger">{error}</Notice>}
 
       <div className="connection-grid">
-        {platforms.map(platform => {
+        {firstReleasePlatforms.map(platform => {
           const capability: Capability | undefined = config?.capabilities.find(
             item => item.platform === platform
           );
@@ -231,7 +259,8 @@ function ConnectionsContent() {
                         </div>
                         <StatusBadge {...status} />
                         <div className="button-row">
-                          {connection.status === "reauth_required" ? (
+                          {connection.status === "reauth_required" ||
+                          connection.status === "disconnected" ? (
                             <Button
                               onClick={() => startOAuth(platform)}
                               size="small"
@@ -250,13 +279,15 @@ function ConnectionsContent() {
                               <RefreshCw aria-hidden="true" size={15} /> Check
                             </Button>
                           )}
-                          <Button
-                            busy={actingId === connection.id}
-                            onClick={() => void disconnect(connection)}
-                            size="small"
-                            variant="danger">
-                            <Unplug aria-hidden="true" size={15} /> Disconnect
-                          </Button>
+                          {connection.status === "disconnected" ? null : (
+                            <Button
+                              busy={actingId === connection.id}
+                              onClick={() => void disconnect(connection)}
+                              size="small"
+                              variant="danger">
+                              <Unplug aria-hidden="true" size={15} /> Disconnect
+                            </Button>
+                          )}
                         </div>
                       </article>
                     );
